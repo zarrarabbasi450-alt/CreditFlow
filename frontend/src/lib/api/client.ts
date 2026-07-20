@@ -1,0 +1,111 @@
+import axios, { AxiosError, type AxiosRequestConfig } from "axios";
+import type { ApiErrorShape, ApiResponse, AuthTokens } from "@/types";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080/api/v1";
+export const tokenStore = {
+  getAccess: () => (typeof window === "undefined" ? null : localStorage.getItem("creditflow_access_token")),
+  getRefresh: () => (typeof window === "undefined" ? null : localStorage.getItem("creditflow_refresh_token")),
+  set: (tokens: AuthTokens) => {
+    localStorage.setItem("creditflow_access_token", tokens.accessToken);
+    localStorage.setItem("creditflow_refresh_token", tokens.refreshToken);
+  },
+  clear: () => {
+    localStorage.removeItem("creditflow_access_token");
+    localStorage.removeItem("creditflow_refresh_token");
+  },
+};
+export class ApiError extends Error {
+  constructor(public readonly info: ApiErrorShape) {
+    super(info.message);
+    this.name = "ApiError";
+  }
+}
+export const apiClient = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 15000,
+  headers: { Accept: "application/json", "Content-Type": "application/json" },
+});
+apiClient.interceptors.request.use((config) => {
+  const id = crypto.randomUUID();
+  config.headers.set("x-request-id", id);
+  config.headers.set(
+    "x-correlation-id",
+    typeof window !== "undefined" ? (sessionStorage.getItem("creditflow_correlation_id") ?? id) : id,
+  );
+  const token = tokenStore.getAccess();
+  if (token) config.headers.set("Authorization", `Bearer ${token}`);
+  return config;
+});
+let refreshing: Promise<string> | null = null;
+async function refreshAccessToken() {
+  const refreshToken = tokenStore.getRefresh();
+  if (!refreshToken) throw new Error("No refresh token");
+  const response = await axios.post<ApiResponse<{ tokens: AuthTokens }>>(
+    `${API_BASE_URL}/auth/refresh`,
+    { refreshToken },
+    { timeout: 15000 },
+  );
+  if (!response.data.success) throw new Error(response.data.error.message);
+  tokenStore.set(response.data.data.tokens);
+  return response.data.data.tokens.accessToken;
+}
+apiClient.interceptors.response.use(
+  (r) => r,
+  async (error: AxiosError) => {
+    const original = error.config as (AxiosRequestConfig & { _retried?: boolean }) | undefined;
+    if (error.response?.status === 401 && original && !original._retried && tokenStore.getRefresh()) {
+      original._retried = true;
+      try {
+        refreshing ??= refreshAccessToken().finally(() => {
+          refreshing = null;
+        });
+        const token = await refreshing;
+        original.headers = { ...original.headers, Authorization: `Bearer ${token}` };
+        return apiClient.request(original);
+      } catch {
+        tokenStore.clear();
+        if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+          window.location.assign("/login?session=expired");
+        }
+      }
+    }
+    const body = error.response?.data as Partial<ApiResponse<never>> | undefined;
+    const failure = body && "error" in body ? body.error : undefined;
+    throw new ApiError({
+      status: error.response?.status ?? 0,
+      code: failure?.code ?? error.code ?? "NETWORK_ERROR",
+      message: failure?.message ?? error.message,
+      details: failure?.details,
+      requestId: body?.meta?.requestId,
+    });
+  },
+);
+export async function request<T>(config: AxiosRequestConfig): Promise<T> {
+  let last: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await apiClient.request<ApiResponse<T>>(config);
+      const payload = response.data as ApiResponse<T> | T;
+      if (typeof payload === "object" && payload !== null && "success" in payload) {
+        if (!payload.success)
+          throw new ApiError({
+            status: 400,
+            code: payload.error.code,
+            message: payload.error.message,
+            details: payload.error.details,
+            requestId: payload.meta.requestId,
+          });
+        return payload.data;
+      }
+      return payload;
+    } catch (error) {
+      last = error;
+      if (
+        config.method?.toUpperCase() !== "GET" ||
+        (error instanceof ApiError && error.info.status >= 400 && error.info.status < 500)
+      )
+        break;
+      await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+    }
+  }
+  throw last;
+}
