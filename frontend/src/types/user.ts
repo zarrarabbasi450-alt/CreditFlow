@@ -58,5 +58,6 @@ export interface AccountInvitation {
   email: string;
   role: AccountRole;
   expires_at: string;
+  accepted_at: string | null;
   created_at: string;
 }

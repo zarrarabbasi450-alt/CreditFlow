@@ -1,36 +1,52 @@
+# ===================================
 # Environment files
+# ===================================
 .env
 .env.*
 !.env.example
 
+# ===================================
 # JWT / RSA keys
+# ===================================
 keys/
 *.pem
 *.key
 
+# ===================================
 # Python
+# ===================================
 __pycache__/
 *.pyc
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+*.log
 
+# ===================================
 # Virtual environments
+# ===================================
 .venv/
 venv/
 
-# Logs
-*.log
-
-# IDE
-.vscode/
-.idea/
-
-# Node
+# ===================================
+# Node / Frontend
+# ===================================
 node_modules/
 .next/
 dist/
+.vite/
+out/
 
-# Docker
-*.env
-*.log
+# ===================================
+# Alembic / migrations temp
+# ===================================
+tmp/
+pytest-tmp/
+
+# ===================================
+# IDE / Editor / OS files
+# ===================================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

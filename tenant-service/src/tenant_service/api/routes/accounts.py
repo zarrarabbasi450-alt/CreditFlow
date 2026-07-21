@@ -7,6 +7,7 @@ from tenant_service.api.dependencies import get_actor
 from tenant_service.schemas.accounts import (
     AccountCreate,
     AccountResponse,
+    AccountUpdate,
     InviteCreate,
     InviteResponse,
     MemberResponse,
@@ -40,6 +41,14 @@ async def list_my_accounts(request: Request, actor: Actor) -> list[AccountRespon
 @router.get("/{account_id}", response_model=AccountResponse, operation_id="get_account")
 async def get_account(account_id: UUID, request: Request, actor: Actor) -> AccountResponse:
     account = await service(request).get(account_id, actor)
+    return AccountResponse.model_validate(account)
+
+
+@router.patch("/{account_id}", response_model=AccountResponse, operation_id="update_account")
+async def update_account(
+    account_id: UUID, payload: AccountUpdate, request: Request, actor: Actor
+) -> AccountResponse:
+    account = await service(request).update(account_id, payload, actor)
     return AccountResponse.model_validate(account)
 
 
@@ -96,6 +105,16 @@ async def invite_account_member(
 ) -> InviteResponse:
     invitation = await service(request).invite(account_id, payload, actor)
     return InviteResponse.model_validate(invitation)
+
+
+@router.get(
+    "/{account_id}/invites",
+    response_model=list[InviteResponse],
+    operation_id="list_account_invites",
+)
+async def list_account_invites(account_id: UUID, request: Request, actor: Actor) -> list[InviteResponse]:
+    invitations = await service(request).list_invites(account_id, actor)
+    return [InviteResponse.model_validate(invitation) for invitation in invitations]
 
 
 @router.get("", response_model=list[AccountResponse], operation_id="list_all_accounts")

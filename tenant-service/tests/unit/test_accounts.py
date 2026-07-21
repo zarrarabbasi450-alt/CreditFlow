@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from tenant_service.core.errors import TenantError
 from tenant_service.models import AccountMember, Base, Invite, MemberRole
-from tenant_service.schemas.accounts import AccountCreate, InviteCreate
+from tenant_service.schemas.accounts import AccountCreate, AccountUpdate, InviteCreate
 from tenant_service.services.accounts import AccountService
 from tenant_service.services.identity import Identity
 from tenant_service.services.rabbitmq import InMemoryEventBus
@@ -111,6 +111,24 @@ async def test_registered_event_creates_individual_account_once(accounts: Accoun
 
 
 @pytest.mark.asyncio
+async def test_account_update_and_invoice_paid_event(accounts: AccountService) -> None:
+    owner_id = uuid4()
+    account = await accounts.create(AccountCreate(name="Before", slug="updates", type="team"), owner_id)
+    owner = actor(owner_id, account.id, MemberRole.OWNER)
+
+    updated = await accounts.update(account.id, AccountUpdate(name="After"), owner)
+    assert updated.name == "After"
+
+    await accounts.handle_event(
+        "invoice.paid", {"account_id": str(account.id), "plan": "pro", "invoice_id": str(uuid4())}
+    )
+    refreshed = await accounts.get(account.id, owner)
+    assert refreshed.plan_tier == "pro"
+    publisher = cast(InMemoryEventBus, accounts.publisher)
+    assert [event[0] for event in publisher.events].count("account.updated") == 2
+
+
+@pytest.mark.asyncio
 async def test_invite_creation_acceptance_and_joined_event(accounts: AccountService) -> None:
     owner_id, invited_user_id = uuid4(), uuid4()
     account = await accounts.create(
@@ -126,6 +144,10 @@ async def test_invite_creation_acceptance_and_joined_event(accounts: AccountServ
     assert invited_event[0] == "member.invited"
     raw_token = cast(str, invited_event[1]["invite_token"])
     assert invitation.token_hash != raw_token
+    assert [
+        value.id
+        for value in await accounts.list_invites(account.id, actor(owner_id, account.id, MemberRole.OWNER))
+    ] == [invitation.id]
 
     member = await accounts.accept_invite(raw_token, invited_user_id)
     assert member.role == MemberRole.ADMIN and member.user_id == invited_user_id

@@ -17,7 +17,7 @@ from tenant_service.services.rabbitmq import EventBusProtocol, RabbitMQService
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    await app.state.rabbitmq.start(app.state.accounts.handle_user_registered)
+    await app.state.rabbitmq.start(app.state.accounts.handle_event)
     yield
     await app.state.rabbitmq.close()
     await app.state.database.close()

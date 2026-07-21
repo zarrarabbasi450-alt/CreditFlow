@@ -17,18 +17,48 @@ type Auth = {
 };
 const Context = createContext<Auth | null>(null);
 const storageKey = "creditflow_auth_session";
+let hydrationPromise: Promise<AuthSession | null> | null = null;
+
+function hydrateSession(): Promise<AuthSession | null> {
+  hydrationPromise ??= (async () => {
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return null;
+    try {
+      const stored = JSON.parse(raw) as AuthSession;
+      tokenStore.set(stored.tokens);
+      const fresh = await authApi.refreshSession(stored.tokens.refreshToken);
+      tokenStore.set(fresh.tokens);
+      localStorage.setItem(storageKey, JSON.stringify(fresh));
+      return fresh;
+    } catch {
+      tokenStore.clear();
+      localStorage.removeItem(storageKey);
+      return null;
+    }
+  })();
+  return hydrationPromise;
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [ready, setReady] = useState(false);
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(storageKey);
-      if (stored) setSession(JSON.parse(stored) as AuthSession);
-    } finally {
-      setReady(true);
-    }
+    let active = true;
+    const hydrate = async () => {
+      try {
+        const fresh = await hydrateSession();
+        if (active) setSession(fresh);
+      } finally {
+        if (active) setReady(true);
+      }
+    };
+    void hydrate();
+    return () => {
+      active = false;
+    };
   }, []);
   const persist = (next: AuthSession | null) => {
+    hydrationPromise = Promise.resolve(next);
     setSession(next);
     if (next) {
       localStorage.setItem(storageKey, JSON.stringify(next));
@@ -59,8 +89,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       },
       refresh: async () => {
         if (!session) return;
-        const tokens = await authApi.refreshToken(session.tokens.refreshToken);
-        persist({ ...session, tokens });
+        persist(await authApi.refreshSession(session.tokens.refreshToken));
       },
       switchAccount: async (accountId) => persist(await authApi.switchAccount(accountId)),
     }),

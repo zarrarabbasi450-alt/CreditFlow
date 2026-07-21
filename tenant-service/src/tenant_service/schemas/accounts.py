@@ -14,6 +14,10 @@ class AccountCreate(BaseModel):
     seat_count: int = Field(default=1, ge=1)
 
 
+class AccountUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+
+
 class AccountResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -56,4 +60,5 @@ class InviteResponse(BaseModel):
     email: EmailStr
     role: MemberRole
     expires_at: datetime
+    accepted_at: datetime | None
     created_at: datetime

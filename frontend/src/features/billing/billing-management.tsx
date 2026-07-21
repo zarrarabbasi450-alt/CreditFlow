@@ -8,6 +8,7 @@ import {
   createCheckout,
   getBilling,
   openBillingPortal,
+  requestRefund,
   type BillingPlan,
 } from "@/lib/api/billing";
 
@@ -65,7 +66,7 @@ const plans: Array<{
   },
 ];
 
-export function BillingManagement() {
+export function BillingManagement({ subsection }: { subsection?: string }) {
   const { user } = useAuth();
   const client = useQueryClient();
   const billing = useQuery({ queryKey: ["billing"], queryFn: getBilling });
@@ -78,11 +79,17 @@ export function BillingManagement() {
     mutationFn: () => changePlan("free"),
     onSuccess: () => client.invalidateQueries({ queryKey: ["billing"] }),
   });
+  const refund = useMutation({
+    mutationFn: requestRefund,
+    onSuccess: () => client.invalidateQueries({ queryKey: ["billing"] }),
+  });
   if (billing.isLoading) return <p className="billing-state">Loading billing…</p>;
   if (billing.error) return <p className="team-error">{billing.error.message}</p>;
   const value = billing.data!;
   const currentPlan = value.subscription.plan.toLowerCase();
   const canViewInvoices = user?.role === "Owner" || user?.role === "SuperAdmin";
+  const showSubscription = !subsection || subsection === "subscription";
+  const showInvoices = !subsection || subsection === "invoices";
   const renewal = value.subscription.renewsAt
     ? new Date(value.subscription.renewsAt).toLocaleDateString(undefined, {
         month: "long",
@@ -92,91 +99,97 @@ export function BillingManagement() {
     : null;
   return (
     <div className="billing-management">
-      <section className="billing-summary">
-        <div className="billing-summary-icon">
-          <CreditCard />
-        </div>
-        <div>
-          <span>Current subscription</span>
-          <h2>{value.subscription.plan}</h2>
-          <p>
-            {value.subscription.status} · {value.subscription.seats} seat(s)
-            {renewal
-              ? ` · ${value.subscription.status === "Canceling" ? "Access until" : "Renews"} ${renewal}`
-              : ""}
-          </p>
-        </div>
-        <div className="billing-secure">
-          <ShieldCheck />
-          <span>Payments securely managed by Stripe</span>
-        </div>
-        {value.subscription.plan !== "Free" && canViewInvoices && (
-          <button onClick={() => redirect.mutate("portal")}>
-            Manage billing <ExternalLink />
-          </button>
-        )}
-      </section>
+      {showSubscription && (
+        <section className="billing-summary">
+          <div className="billing-summary-icon">
+            <CreditCard />
+          </div>
+          <div>
+            <span>Current subscription</span>
+            <h2>{value.subscription.plan}</h2>
+            <p>
+              {value.subscription.status} · {value.subscription.seats} seat(s)
+              {renewal
+                ? ` · ${value.subscription.status === "Canceling" ? "Access until" : "Renews"} ${renewal}`
+                : ""}
+            </p>
+          </div>
+          <div className="billing-secure">
+            <ShieldCheck />
+            <span>Payments securely managed by Stripe</span>
+          </div>
+          {value.subscription.plan !== "Free" && canViewInvoices && (
+            <button onClick={() => redirect.mutate("portal")}>
+              Manage billing <ExternalLink />
+            </button>
+          )}
+        </section>
+      )}
 
-      <div className="billing-section-heading">
-        <div>
-          <span>Simple, transparent pricing</span>
-          <h3>Choose the plan that matches your momentum</h3>
-          <p>
-            Upgrade as your content operation grows. Paid plans renew monthly and are billed securely through
-            Stripe.
-          </p>
-        </div>
-      </div>
-      <div className="billing-plan-grid">
-        {plans.map((plan) => {
-          const current = currentPlan === plan.id;
-          return (
-            <article key={plan.id} className={plan.recommended ? "recommended" : ""}>
-              {plan.recommended && (
-                <div className="billing-plan-badge">
-                  <Sparkles /> Most popular
-                </div>
-              )}
-              <div className="billing-plan-title">
-                <h4>{plan.name}</h4>
-                {current && <span>Current plan</span>}
-              </div>
-              <p>{plan.description}</p>
-              <div className="billing-price">
-                <strong>${plan.price.toLocaleString()}</strong>
-                <span>
-                  USD
-                  <br />
-                  per month
-                </span>
-              </div>
-              <ul>
-                {plan.features.map((feature) => (
-                  <li key={feature}>
-                    <Check />
-                    {feature}
-                  </li>
-                ))}
-              </ul>
-              <button
-                disabled={current || redirect.isPending || free.isPending}
-                onClick={() => (plan.id === "free" ? free.mutate() : redirect.mutate(plan.id))}
-              >
-                {current
-                  ? "Your current plan"
-                  : plan.id === "free"
-                    ? "Downgrade to Free"
-                    : `Choose ${plan.name}`}
-              </button>
-            </article>
-          );
-        })}
-      </div>
+      {showSubscription && (
+        <>
+          <div className="billing-section-heading">
+            <div>
+              <span>Simple, transparent pricing</span>
+              <h3>Choose the plan that matches your momentum</h3>
+              <p>
+                Upgrade as your content operation grows. Paid plans renew monthly and are billed securely
+                through Stripe.
+              </p>
+            </div>
+          </div>
+          <div className="billing-plan-grid">
+            {plans.map((plan) => {
+              const current = currentPlan === plan.id;
+              return (
+                <article key={plan.id} className={plan.recommended ? "recommended" : ""}>
+                  {plan.recommended && (
+                    <div className="billing-plan-badge">
+                      <Sparkles /> Most popular
+                    </div>
+                  )}
+                  <div className="billing-plan-title">
+                    <h4>{plan.name}</h4>
+                    {current && <span>Current plan</span>}
+                  </div>
+                  <p>{plan.description}</p>
+                  <div className="billing-price">
+                    <strong>${plan.price.toLocaleString()}</strong>
+                    <span>
+                      USD
+                      <br />
+                      per month
+                    </span>
+                  </div>
+                  <ul>
+                    {plan.features.map((feature) => (
+                      <li key={feature}>
+                        <Check />
+                        {feature}
+                      </li>
+                    ))}
+                  </ul>
+                  <button
+                    disabled={current || redirect.isPending || free.isPending}
+                    onClick={() => (plan.id === "free" ? free.mutate() : redirect.mutate(plan.id))}
+                  >
+                    {current
+                      ? "Your current plan"
+                      : plan.id === "free"
+                        ? "Downgrade to Free"
+                        : `Choose ${plan.name}`}
+                  </button>
+                </article>
+              );
+            })}
+          </div>
+        </>
+      )}
       {(redirect.error || free.error) && (
         <p className="team-error billing-error">{(redirect.error ?? free.error)?.message}</p>
       )}
 
-      {canViewInvoices && (
+      {canViewInvoices && showInvoices && (
         <section className="billing-invoices">
           <div>
             <div>
@@ -211,11 +224,31 @@ export function BillingManagement() {
                     View <ExternalLink />
                   </a>
                 )}
+                {invoice.status === "Paid" && (
+                  <button disabled={refund.isPending} onClick={() => refund.mutate(invoice.id)}>
+                    Request refund
+                  </button>
+                )}
               </div>
             ))}
           </div>
         </section>
       )}
+      {subsection === "payment-methods" && canViewInvoices && (
+        <section className="billing-invoices">
+          <div>
+            <div>
+              <span>Stripe customer portal</span>
+              <h3>Payment methods</h3>
+              <p>Add, replace, or remove payment methods securely in Stripe.</p>
+            </div>
+            <button onClick={() => redirect.mutate("portal")}>
+              Open secure portal <ExternalLink />
+            </button>
+          </div>
+        </section>
+      )}
+      {refund.error && <p className="team-error billing-error">{refund.error.message}</p>}
     </div>
   );
 }

@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from tenant_service.core.errors import TenantError
 from tenant_service.models import Account, AccountMember, AccountType, Invite, MemberRole
-from tenant_service.schemas.accounts import AccountCreate, InviteCreate
+from tenant_service.schemas.accounts import AccountCreate, AccountUpdate, InviteCreate
 from tenant_service.services.identity import Identity
 from tenant_service.services.rabbitmq import EventPublisherProtocol
 
@@ -87,6 +87,30 @@ class AccountService:
                 {"account_id": str(account.id), "name": account.name, "type": account.type},
             )
 
+    async def handle_event(self, event_type: str, payload: dict[str, Any]) -> None:
+        if event_type == "user.registered":
+            await self.handle_user_registered(payload)
+        elif event_type == "invoice.paid":
+            await self.handle_invoice_paid(payload)
+
+    async def handle_invoice_paid(self, payload: dict[str, Any]) -> None:
+        try:
+            account_id = UUID(str(payload["account_id"]))
+            plan = str(payload["plan"]).strip().lower()
+        except (KeyError, ValueError) as exc:
+            raise TenantError(400, "INVALID_INVOICE_EVENT", "invoice.paid event is invalid") from exc
+        if not plan:
+            raise TenantError(400, "INVALID_INVOICE_EVENT", "invoice.paid event is invalid")
+        async with self.sessions() as session, session.begin():
+            account = await session.get(Account, account_id, with_for_update=True)
+            if account is None:
+                raise TenantError(404, "ACCOUNT_NOT_FOUND", "Account was not found")
+            account.plan_tier = plan
+        await self._publish(
+            "account.updated",
+            {"account_id": str(account_id), "plan_tier": plan, "source": "invoice.paid"},
+        )
+
     async def get(self, account_id: UUID, actor: Identity) -> Account:
         async with self.sessions() as session:
             if not actor.is_superadmin:
@@ -95,6 +119,19 @@ class AccountService:
             if account is None:
                 raise TenantError(404, "ACCOUNT_NOT_FOUND", "Account was not found")
             return account
+
+    async def update(self, account_id: UUID, payload: AccountUpdate, actor: Identity) -> Account:
+        async with self.sessions() as session, session.begin():
+            await self._manager(session, account_id, actor)
+            account = await session.get(Account, account_id)
+            if account is None:
+                raise TenantError(404, "ACCOUNT_NOT_FOUND", "Account was not found")
+            account.name = payload.name.strip()
+        await self._publish(
+            "account.updated",
+            {"account_id": str(account_id), "name": account.name},
+        )
+        return account
 
     async def list_for_user(self, actor: Identity, *, all_accounts: bool = False) -> list[Account]:
         async with self.sessions() as session:
@@ -195,6 +232,19 @@ class AccountService:
             },
         )
         return invitation
+
+    async def list_invites(self, account_id: UUID, actor: Identity) -> list[Invite]:
+        async with self.sessions() as session:
+            await self._manager(session, account_id, actor)
+            return list(
+                (
+                    await session.scalars(
+                        select(Invite)
+                        .where(Invite.account_id == account_id)
+                        .order_by(Invite.created_at.desc())
+                    )
+                ).all()
+            )
 
     async def accept_invite(self, raw_token: str, user_id: UUID) -> AccountMember:
         now = datetime.now(UTC)

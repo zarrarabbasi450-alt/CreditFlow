@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import ORJSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from api_gateway.api.routes import dashboard, operations, proxy, sse, webhooks
+from api_gateway.api.routes import admin, dashboard, operations, proxy, sse, webhooks
 from api_gateway.core.config import get_settings
 from api_gateway.core.errors import (
     GatewayError,
@@ -72,6 +72,7 @@ def create_app() -> FastAPI:
     app.include_router(operations.router)
     app.include_router(webhooks.router)
     app.include_router(dashboard.router)
+    app.include_router(admin.router)
     app.include_router(sse.router)
     app.include_router(proxy.router)
     return app

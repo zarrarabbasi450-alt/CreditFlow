@@ -184,6 +184,17 @@ async def test_proxy_timeout_and_downstream_error() -> None:
         assert caught.value.code == "CONFLICT"
 
 
+@pytest.mark.asyncio
+async def test_service_health_probe() -> None:
+    async def healthy(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"status": "healthy"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(healthy)) as client:
+        proxy = ProxyService(client, {"auth": "http://auth"})
+        assert await proxy.service_healthy("auth")
+        assert not await proxy.service_healthy("missing")
+
+
 def test_dashboard_success_and_degraded(client: TestClient, auth_headers: dict[str, str]) -> None:
     client.app.state.proxy.request_json = AsyncMock(return_value={"value": 1})
     response = client.get("/api/v1/dashboard/overview", headers=auth_headers)
@@ -198,6 +209,17 @@ def test_dashboard_success_and_degraded(client: TestClient, auth_headers: dict[s
     assert client.get("/api/v1/dashboard/overview", headers=auth_headers).json()["degraded_services"] == [
         "usage"
     ]
+
+
+def test_admin_overview_requires_superadmin_and_reports_health(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    assert client.get("/api/v1/admin/overview", headers=auth_headers).status_code == 403
+    client.app.state.proxy.service_healthy = AsyncMock(return_value=True)
+    headers = {"Authorization": f"Bearer {make_token(role='SuperAdmin', platform_role='SuperAdmin')}"}
+    response = client.get("/api/v1/admin/overview", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["view"]["metrics"][0]["value"] == "5/5"
 
 
 def test_sse_unauthorized_and_account_isolation(client: TestClient, auth_headers: dict[str, str]) -> None:

@@ -21,13 +21,50 @@ const meta = () => ({
 const ok = <T>(data: T, status = 200) =>
   HttpResponse.json<ApiResponse<T>>({ success: true, data, meta: meta() }, { status });
 export const handlers = [
-  http.get(`${base}/auth/me`, () => ok(sessionFor("Owner", "Avery Moore", "owner@orionmedia.com").user)),
+  http.get(`${base}/auth/me`, () =>
+    ok({
+      id: "user_owner",
+      email: "owner@orionmedia.com",
+      accountId: "tenant_orion",
+      role: "Owner" as const,
+      accountRole: "Owner" as const,
+      platformRole: null,
+    }),
+  ),
+  http.post(`${base}/auth/login`, async ({ request }) => {
+    const body = (await request.json()) as { email: string; password: string };
+    const profile = credentials.find((item) => item.email === body.email && item.password === body.password);
+    if (!profile)
+      return HttpResponse.json(
+        {
+          success: false,
+          error: { code: "INVALID_CREDENTIALS", message: "Email or password is incorrect" },
+          meta: meta(),
+        },
+        { status: 401 },
+      );
+    const session = sessionFor(profile.role, profile.name, profile.email);
+    return ok({
+      user: {
+        id: session.user.id,
+        email: session.user.email,
+        accountId: profile.role === "SuperAdmin" ? "platform" : "tenant_orion",
+        role: profile.role,
+        accountRole: profile.role === "SuperAdmin" ? ("Owner" as const) : profile.role,
+        platformRole: profile.role === "SuperAdmin" ? ("SuperAdmin" as const) : null,
+      },
+      tokens: session.tokens,
+    });
+  }),
   http.post(`${base}/auth/development-role`, async ({ request }) => {
     const { role } = (await request.json()) as { role: Role };
     const profile = credentials.find((item) => item.role === role) ?? credentials[0];
     return ok(sessionFor(profile.role, profile.name, profile.email));
   }),
   http.get(`${base}/dashboard`, () => ok(productViews.dashboard)),
+  http.get(`${base}/dashboard/overview`, () =>
+    ok({ data: { dashboard: productViews.dashboard }, degraded_services: [] }),
+  ),
   http.get(`${base}/users`, () =>
     ok({ view: productViews.team, users: { items: users, page: 1, pageSize: 20, total: users.length } }),
   ),
@@ -85,7 +122,32 @@ export const handlers = [
   ),
   http.get(`${base}/billing/overview`, () => ok(billing)),
   http.get(`${base}/credits/overview`, () => ok(credits)),
-  http.get(`${base}/usage/summary`, () => ok(usage)),
+  http.get(`${base}/usage/summary`, () =>
+    ok({
+      account_id: usage.accountId,
+      period_start: usage.periodStart,
+      period_end: usage.periodEnd,
+      tokens_used: usage.tokensUsed,
+      cost_microusd: usage.costMicrousd,
+      quota_tokens: usage.quotaTokens,
+      remaining_tokens: usage.remainingTokens,
+      quota_percentage: usage.quotaPercentage,
+      generations: usage.generations,
+      by_model: usage.byModel.map((item) => ({
+        model: item.model,
+        tokens: item.tokens,
+        cost_microusd: item.costMicrousd,
+        generations: item.generations,
+      })),
+      daily: usage.daily.map((item) => ({
+        day: `2026-${item.day}`,
+        tokens: item.tokens,
+        cost_microusd: 0,
+        generations: item.posts,
+      })),
+    }),
+  ),
+  http.get(`${base}/usage/ledger`, () => ok([])),
   http.get(`${base}/content`, () => ok({ view: productViews.content, items: contentItems })),
   http.get(`${base}/ai/overview`, () => ok(productViews["ai-studio"])),
   http.post(`${base}/ai/generations`, async ({ request }) => {

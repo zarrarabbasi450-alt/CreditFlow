@@ -50,6 +50,42 @@ class CreditsService:
                 ).all()
             )
 
+    async def consume_credits(
+        self,
+        account_id: UUID,
+        user_id: UUID,
+        amount: int,
+        reference_id: UUID,
+        description: str,
+    ) -> int:
+        changed = False
+        async with self.sessions() as session, session.begin():
+            processed = await session.scalar(
+                select(ProcessedEvent).where(ProcessedEvent.event_id == reference_id)
+            )
+            if processed is not None:
+                return await self.balance(account_id, session)
+            current = await self.balance(account_id, session)
+            if current < amount:
+                raise CreditsError(409, "INSUFFICIENT_CREDITS", "Available credits are insufficient")
+            session.add_all([
+                CreditLedger(
+                    account_id=account_id,
+                    entry_type=LedgerType.USAGE,
+                    amount=-amount,
+                    description=description.strip(),
+                    reference_type="usage",
+                    reference_id=str(reference_id),
+                    created_by_user_id=user_id,
+                ),
+                ProcessedEvent(event_id=reference_id, event_type="credits.consumed"),
+            ])
+            changed = True
+            remaining = current - amount
+        if changed:
+            await self._balance_events(account_id, -amount, "debited", str(reference_id))
+        return remaining
+
     async def listings(self) -> list[MarketplaceListing]:
         async with self.sessions() as session, session.begin():
             cutoff = datetime.now(UTC) - timedelta(minutes=15)
