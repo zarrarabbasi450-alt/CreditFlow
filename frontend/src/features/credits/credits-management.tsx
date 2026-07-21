@@ -5,11 +5,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import {
   cancelCreditPurchase,
+  cancelCreditListing,
   confirmCreditPurchase,
   createCreditListing,
   getCredits,
   purchaseCredits,
 } from "@/lib/api/credits";
+import { useAuth } from "@/hooks/useAuth";
 
 const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "";
 const stripePromise = publishableKey ? loadStripe(publishableKey) : null;
@@ -63,7 +65,8 @@ function PaymentForm({ payment, close }: { payment: Payment; close: () => void }
   );
 }
 
-export function CreditsManagement() {
+export function CreditsManagement({ subsection }: { subsection?: string }) {
+  const { user } = useAuth();
   const client = useQueryClient();
   const overview = useQuery({ queryKey: ["credits"], queryFn: getCredits });
   const [credits, setCredits] = useState("");
@@ -77,6 +80,10 @@ export function CreditsManagement() {
       setPrice("");
       void client.invalidateQueries({ queryKey: ["credits"] });
     },
+  });
+  const cancelListing = useMutation({
+    mutationFn: cancelCreditListing,
+    onSuccess: () => client.invalidateQueries({ queryKey: ["credits"] }),
   });
   const purchase = useMutation({
     mutationFn: purchaseCredits,
@@ -93,6 +100,8 @@ export function CreditsManagement() {
   if (overview.isLoading) return <p>Loading credits…</p>;
   if (overview.error) return <p className="team-error">{overview.error.message}</p>;
   const value = overview.data!;
+  const showMarketplace = !subsection || subsection === "marketplace";
+  const showLedger = !subsection || subsection === "ledger";
   return (
     <div className="credits-management">
       <div className="metric-grid">
@@ -111,82 +120,98 @@ export function CreditsManagement() {
           <small>Secure Billing escrow</small>
         </article>
       </div>
-      <form
-        className="generator"
-        onSubmit={(event) => {
-          event.preventDefault();
-          create.mutate({ credits: Number(credits), priceCents: Math.round(Number(price) * 100) });
-        }}
-      >
-        <label htmlFor="listing-credits">List surplus credits</label>
-        <input
-          id="listing-credits"
-          type="number"
-          min="1"
-          required
-          placeholder="Credits"
-          value={credits}
-          onChange={(event) => setCredits(event.target.value)}
-        />
-        <label htmlFor="listing-price">Price (USD)</label>
-        <input
-          id="listing-price"
-          type="number"
-          min="0.01"
-          step="0.01"
-          required
-          placeholder="Price"
-          value={price}
-          onChange={(event) => setPrice(event.target.value)}
-        />
-        <button className="primary-button" disabled={create.isPending}>
-          Create listing
-        </button>
-        {create.error && <p className="team-error">{create.error.message}</p>}
-      </form>
-      <div className="data-rows">
-        {value.listings.map((item) => (
-          <div key={item.id}>
-            <div>
-              <strong>{item.credits.toLocaleString()} credits</strong>
-              <small>
-                ${(item.priceCents / 100).toFixed(2)} · expires{" "}
-                {new Date(item.expiresAt).toLocaleDateString()}
-              </small>
+      {showMarketplace && (
+        <form
+          className="generator"
+          onSubmit={(event) => {
+            event.preventDefault();
+            create.mutate({ credits: Number(credits), priceCents: Math.round(Number(price) * 100) });
+          }}
+        >
+          <label htmlFor="listing-credits">List surplus credits</label>
+          <input
+            id="listing-credits"
+            type="number"
+            min="1"
+            required
+            placeholder="Credits"
+            value={credits}
+            onChange={(event) => setCredits(event.target.value)}
+          />
+          <label htmlFor="listing-price">Price (USD)</label>
+          <input
+            id="listing-price"
+            type="number"
+            min="0.01"
+            step="0.01"
+            required
+            placeholder="Price"
+            value={price}
+            onChange={(event) => setPrice(event.target.value)}
+          />
+          <button className="primary-button" disabled={create.isPending}>
+            Create listing
+          </button>
+          {create.error && <p className="team-error">{create.error.message}</p>}
+        </form>
+      )}
+      {showMarketplace && (
+        <div className="data-rows">
+          {value.listings.map((item) => (
+            <div key={item.id}>
+              <div>
+                <strong>{item.credits.toLocaleString()} credits</strong>
+                <small>
+                  ${(item.priceCents / 100).toFixed(2)} · expires{" "}
+                  {new Date(item.expiresAt).toLocaleDateString()}
+                </small>
+              </div>
+              {item.sellerAccountId !== user?.workspace?.id && (
+                <button
+                  className="primary-button"
+                  disabled={purchase.isPending}
+                  onClick={() => purchase.mutate(item.id)}
+                >
+                  Buy
+                </button>
+              )}
+              {item.sellerAccountId === user?.workspace?.id && (
+                <button disabled={cancelListing.isPending} onClick={() => cancelListing.mutate(item.id)}>
+                  Cancel listing
+                </button>
+              )}
             </div>
-            <button
-              className="primary-button"
-              disabled={purchase.isPending}
-              onClick={() => purchase.mutate(item.id)}
-            >
-              Buy
-            </button>
-          </div>
-        ))}
-      </div>
+          ))}
+          {!value.listings.length && <p>No marketplace listings are currently available.</p>}
+        </div>
+      )}
       {configurationError && <p className="team-error">{configurationError}</p>}
       {purchase.error && <p className="team-error">{purchase.error.message}</p>}
-      {payment && stripePromise && (
+      {showMarketplace && payment && stripePromise && (
         <Elements stripe={stripePromise} options={{ clientSecret: payment.clientSecret }}>
           <PaymentForm payment={payment} close={() => setPayment(null)} />
         </Elements>
       )}
-      <div className="data-rows">
-        {value.ledger.map((entry) => (
-          <div key={entry.id}>
-            <div>
-              <strong>{entry.description}</strong>
-              <small>
-                {new Date(entry.createdAt).toLocaleString()} · {entry.type}
-              </small>
+      {showLedger && (
+        <div className="data-rows">
+          {value.ledger.map((entry) => (
+            <div key={entry.id}>
+              <div>
+                <strong>{entry.description}</strong>
+                <small>
+                  {new Date(entry.createdAt).toLocaleString()} · {entry.type}
+                </small>
+              </div>
+              <em>
+                {entry.amount > 0 ? "+" : ""}
+                {entry.amount.toLocaleString()}
+              </em>
             </div>
-            <em>
-              {entry.amount > 0 ? "+" : ""}
-              {entry.amount.toLocaleString()}
-            </em>
-          </div>
-        ))}
-      </div>
+          ))}
+          {!value.ledger.length && <p>No credit transactions have been recorded.</p>}
+        </div>
+      )}
+      {cancelListing.error && <p className="team-error">{cancelListing.error.message}</p>}
     </div>
   );
 }

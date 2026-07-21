@@ -76,6 +76,15 @@ async def login(payload: LoginRequest, request: Request) -> LoginSuccessResponse
     return LoginSuccessResponse(data=login_data(result), meta=meta(request))
 
 
+@router.get("/me", response_model=AuthUserResponse, operation_id="auth_current_user")
+async def current_user(request: Request, authorization: str = Header()) -> AuthUserResponse:
+    if not authorization.startswith("Bearer "):
+        raise AuthError(401, "MISSING_ACCESS_TOKEN", "Bearer access token is required")
+    authentication: AuthService = request.app.state.authentication
+    identity = await authentication.current_identity(authorization.removeprefix("Bearer ").strip())
+    return user(identity)
+
+
 async def superadmin(request: Request, authorization: str = Header()) -> AuthService:
     if not authorization.startswith("Bearer "):
         raise AuthError(401, "MISSING_ACCESS_TOKEN", "Bearer access token is required")

@@ -87,6 +87,14 @@ async def test_signup_login_and_refresh_rotation(authentication: AuthService) ->
     assert invalid.value.code == "INVALID_CREDENTIALS"
 
     login = await authentication.login("owner@example.com", "Password123!", "127.0.0.1")
+    publisher = cast(InMemoryEventPublisher, authentication.verification.publisher)
+    assert publisher.events[-1][0] == "user.logged_in"
+    assert publisher.events[-1][1]["user_id"] == str(identity.user_id)
+    current = await authentication.current_identity(login.tokens.access_token)
+    assert current.user_id == identity.user_id
+    with pytest.raises(AuthError) as forbidden:
+        await authentication.require_superadmin(login.tokens.access_token)
+    assert forbidden.value.code == "SUPERADMIN_REQUIRED"
     claims = authentication.tokens.decode_refresh(login.tokens.refresh_token)
     assert claims["user_id"] == str(identity.user_id)
     assert claims["account_id"] == str(identity.account_id)
@@ -140,6 +148,18 @@ async def test_verification_reset_rate_limit_and_logout(authentication: AuthServ
         credential = await session.scalar(select(Credential).where(Credential.user_id == identity.user_id))
     assert user is not None and user.is_email_verified
     assert credential is not None and credential.password_changed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_last_superadmin_cannot_be_removed(authentication: AuthService) -> None:
+    identity = await authentication.signup("root@example.com", "Password123!")
+    async with authentication.sessions() as session, session.begin():
+        user = await session.get(User, identity.user_id)
+        assert user is not None
+        user.platform_role = "SuperAdmin"
+    with pytest.raises(AuthError) as caught:
+        await authentication.update_platform_role(identity.user_id, None)
+    assert caught.value.code == "LAST_SUPERADMIN_REQUIRED"
 
 
 def test_jwt_configuration_error() -> None:

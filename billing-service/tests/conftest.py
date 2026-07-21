@@ -7,6 +7,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from billing_service.core.config import get_settings
 from billing_service.main import create_app
 from billing_service.models import Base, Subscription
 from billing_service.services.identity import Identity
@@ -77,6 +78,10 @@ class DatabaseStub:
 
 @pytest.fixture
 async def client() -> AsyncIterator[AsyncClient]:
+    settings = get_settings()
+    settings.stripe_pro_price_id = "price_pro_test"
+    settings.stripe_team_price_id = "price_team_test"
+    settings.stripe_enterprise_price_id = "price_enterprise_test"
     engine = create_async_engine(
         "sqlite+aiosqlite://",
         connect_args={"check_same_thread": False},

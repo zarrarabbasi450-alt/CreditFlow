@@ -25,7 +25,8 @@ class RedisService:
 
     async def eval(self, script: str, keys: list[str], args: list[str | int]) -> list[int]:
         redis_args = [*keys, *(str(argument) for argument in args)]
-        return cast(list[int], await self.client.eval(script, len(keys), *redis_args))
+        result = await cast(Awaitable[Any], self.client.eval(script, len(keys), *redis_args))
+        return cast(list[int], result)
 
     async def subscribe(self, channel: str) -> AsyncGenerator[dict[str, Any]]:
         pubsub = self.client.pubsub()

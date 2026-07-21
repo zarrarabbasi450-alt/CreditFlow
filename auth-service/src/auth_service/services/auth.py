@@ -128,6 +128,15 @@ class AuthService:
             session.add(self._refresh_record(identity.user_id, pair))
         await self.redis.clear_login_failures(normalized, ip)
         await self._store_access(identity, pair)
+        await self.verification.publisher.publish(
+            "user.logged_in",
+            {
+                "user_id": str(identity.user_id),
+                "account_id": str(identity.account_id),
+                "role": identity.role,
+                "jti": pair.access_jti,
+            },
+        )
         return AuthResult(identity, pair)
 
     async def refresh(self, raw_token: str) -> AuthResult:
@@ -238,14 +247,26 @@ class AuthService:
         )
 
     async def require_superadmin(self, access_token: str) -> AuthIdentity:
+        identity = await self.current_identity(access_token)
+        if not is_superadmin(identity):
+            raise AuthError(403, "SUPERADMIN_REQUIRED", "SuperAdmin access is required")
+        return identity
+
+    async def current_identity(self, access_token: str) -> AuthIdentity:
         claims = self.tokens.decode_access(access_token)
         if not await self.redis.session_active(str(claims["jti"])):
             raise AuthError(401, "SESSION_REVOKED", "Access token session is no longer active")
         async with self.sessions() as session:
             user = await session.get(User, UUID(str(claims["user_id"])))
-            if user is None or user.platform_role != "SuperAdmin":
-                raise AuthError(403, "SUPERADMIN_REQUIRED", "SuperAdmin access is required")
-            return self._identity(user)
+            if user is None or not user.is_active:
+                raise AuthError(401, "INVALID_TOKEN", "User is not active")
+            return AuthIdentity(
+                user.id,
+                user.email,
+                UUID(str(claims["account_id"])),
+                str(claims["account_role"]),
+                user.platform_role,
+            )
 
     async def list_users(self) -> list[User]:
         async with self.sessions() as session:
@@ -256,6 +277,19 @@ class AuthService:
             user = await session.get(User, user_id)
             if user is None:
                 raise AuthError(404, "USER_NOT_FOUND", "User was not found")
+            if user.platform_role == "SuperAdmin" and platform_role is None:
+                remaining = await session.scalar(
+                    select(func.count(User.id)).where(
+                        User.platform_role == "SuperAdmin",
+                        User.is_active.is_(True),
+                    )
+                )
+                if int(remaining or 0) <= 1:
+                    raise AuthError(
+                        409,
+                        "LAST_SUPERADMIN_REQUIRED",
+                        "The final active SuperAdmin cannot be removed",
+                    )
             user.platform_role = platform_role
         await self.redis.revoke_user_sessions(user_id)
         return user

@@ -37,6 +37,18 @@ class ProxyService:
             raise self._downstream_error(response)
         return response.json()
 
+    async def service_healthy(self, service: str, timeout_seconds: float = 2.0) -> bool:
+        if service not in self.service_urls:
+            return False
+        try:
+            response = await self.client.get(
+                f"{self.service_urls[service]}/health",
+                timeout=timeout_seconds,
+            )
+            return response.status_code < 400
+        except httpx.HTTPError:
+            return False
+
     async def proxy(self, service: str, path: str, request: Request) -> Response:
         response = await self._send(service, path, request)
         if response.status_code >= 400:

@@ -7,7 +7,7 @@ from uuid import uuid4
 import aio_pika
 from aio_pika.abc import AbstractChannel, AbstractIncomingMessage, AbstractRobustConnection
 
-EventHandler = Callable[[dict[str, Any]], Awaitable[None]]
+EventHandler = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 
 class EventPublisherProtocol(Protocol):
@@ -59,16 +59,23 @@ class RabbitMQService:
         exchange = await self.consumer_channel.declare_exchange(
             "creditflow.events", aio_pika.ExchangeType.TOPIC, durable=True
         )
-        queue = await self.consumer_channel.declare_queue("tenant-service.user-registered", durable=True)
+        billing_exchange = await self.consumer_channel.declare_exchange(
+            "billing_events", aio_pika.ExchangeType.TOPIC, durable=True
+        )
+        queue = await self.consumer_channel.declare_queue("tenant-service.events", durable=True)
         await queue.bind(exchange, routing_key="user.registered")
+        await queue.bind(billing_exchange, routing_key="invoice.paid")
 
         async def consume(message: AbstractIncomingMessage) -> None:
             async with message.process(requeue=True):
                 envelope = json.loads(message.body)
                 data = envelope.get("data")
+                if data is None:
+                    data = envelope.get("payload")
                 if not isinstance(data, dict):
                     raise ValueError("Event data must be an object")
-                await handler(data)
+                event_type = str(envelope.get("type") or envelope.get("event_type") or message.type or "")
+                await handler(event_type, data)
 
         await queue.consume(consume)
 
@@ -93,7 +100,7 @@ class InMemoryEventBus:
     async def close(self) -> None:
         return None
 
-    async def deliver(self, payload: dict[str, Any]) -> None:
+    async def deliver(self, event_type: str, payload: dict[str, Any]) -> None:
         if self.handler is None:
             raise RuntimeError("Consumer is not started")
-        await self.handler(payload)
+        await self.handler(event_type, payload)

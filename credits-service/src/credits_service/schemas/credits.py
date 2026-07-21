@@ -23,6 +23,12 @@ class BalanceResponse(BaseModel):
     balance: int
 
 
+class CreditConsumption(BaseModel):
+    amount: int = Field(gt=0)
+    reference_id: UUID
+    description: str = Field(min_length=1, max_length=500)
+
+
 class ListingCreate(BaseModel):
     credits: int = Field(gt=0)
     price_cents: int = Field(gt=0)

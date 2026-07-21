@@ -1,6 +1,7 @@
 "use client";
 import { motion } from "framer-motion";
-import { ArrowUpRight, CheckCircle2, Clock, MoreHorizontal, Plus, Sparkles } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { ArrowUpRight, CheckCircle2, Clock, Plus, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { RecurringScheduleForm } from "@/features/scheduler/recurring-form";
@@ -11,8 +12,11 @@ import { useProductView } from "@/hooks/useProductView";
 import { TeamManagement } from "@/features/team/team-management";
 import { BillingManagement } from "@/features/billing/billing-management";
 import { CreditsManagement } from "@/features/credits/credits-management";
+import { AdminOperations } from "@/features/admin/operations";
+import { AccountSettings } from "@/features/settings/account-settings";
+import { UsageManagement } from "@/features/usage/usage-management";
 import type { ActivityRow } from "@/types";
-function SectionTabs({ section }: { section: string }) {
+function SectionTabs({ section, subsection }: { section: string; subsection?: string }) {
   const tabs: Record<string, string[]> = {
     billing: ["Overview", "Subscription", "Invoices", "Payment methods"],
     credits: ["Overview", "Ledger", "Marketplace"],
@@ -20,27 +24,30 @@ function SectionTabs({ section }: { section: string }) {
     publishing: ["Overview", "LinkedIn", "LinkedIn image", "History"],
     settings: ["Account", "Sessions", "API keys"],
     team: ["Members", "Invitations"],
+    usage: ["Overview", "Ledger", "Models"],
     admin: ["Overview", "Accounts", "Users", "Health", "Audit", "Failed jobs", "Feature flags"],
   };
   return tabs[section] ? (
     <div className="tabs">
-      {tabs[section].map((tab) => (
-        <a
-          key={tab}
-          href={
-            tab === "Overview" || tab === "Calendar"
-              ? `/${section}`
-              : `/${section}/${tab.toLowerCase().replaceAll(" ", "-")}`
-          }
-        >
-          {tab}
-        </a>
-      ))}
+      {tabs[section].map((tab) => {
+        const slug = tab.toLowerCase().replaceAll(" ", "-");
+        const root = tab === "Overview" || tab === "Calendar";
+        return (
+          <a
+            key={tab}
+            className={(root ? !subsection : subsection === slug) ? "active" : undefined}
+            href={root ? `/${section}` : `/${section}/${slug}`}
+          >
+            {tab}
+          </a>
+        );
+      })}
     </div>
   ) : null;
 }
 export function ProductPage({ section, subsection }: { section: string; subsection?: string }) {
-  const { data: base, isLoading, error } = useProductView(section);
+  const { data: base, isLoading, error, refetch } = useProductView(section);
+  const queryClient = useQueryClient();
   const { notify } = useToast();
   const [prompt, setPrompt] = useState("");
   const [output, setOutput] = useState("");
@@ -73,6 +80,20 @@ export function ProductPage({ section, subsection }: { section: string; subsecti
       document.getElementById("team-invite-email")?.focus();
       return;
     }
+    if (section === "admin") {
+      window.location.assign("/admin/users");
+      return;
+    }
+    if (section === "credits") {
+      document.getElementById("listing-credits")?.focus();
+      return;
+    }
+    if (section === "usage") {
+      void Promise.all([refetch(), queryClient.invalidateQueries({ queryKey: ["usage"] })]).then(() =>
+        notify("Usage refreshed"),
+      );
+      return;
+    }
     notify(`${base.action} action opened`);
   };
   const title = subsection
@@ -80,7 +101,7 @@ export function ProductPage({ section, subsection }: { section: string; subsecti
     : base.title;
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-      <SectionTabs section={section} />
+      <SectionTabs section={section} subsection={subsection} />
       <div className="page-heading">
         <div>
           <span>{base.eyebrow}</span>
@@ -94,7 +115,7 @@ export function ProductPage({ section, subsection }: { section: string; subsecti
           </button>
         )}
       </div>
-      {base.metrics && (
+      {base.metrics && !(section === "admin" && subsection) && (
         <div className="metric-grid">
           {base.metrics.map((metric) => (
             <article key={metric.label}>
@@ -152,17 +173,40 @@ export function ProductPage({ section, subsection }: { section: string; subsecti
       )}
       {section === "team" && (
         <Panel title="Members">
-          <TeamManagement />
+          <TeamManagement subsection={subsection} />
         </Panel>
       )}
       {section === "billing" && (
         <Panel title="Subscription & invoices">
-          <BillingManagement />
+          <BillingManagement subsection={subsection} />
         </Panel>
       )}
       {section === "credits" && (
         <Panel title="Balance, ledger & marketplace">
-          <CreditsManagement />
+          <CreditsManagement subsection={subsection} />
+        </Panel>
+      )}
+      {section === "settings" && (
+        <Panel title={subsection ? title : "Account settings"}>
+          <AccountSettings subsection={subsection} />
+        </Panel>
+      )}
+      {section === "admin" && (
+        <Panel title={subsection ? title : "Platform operations"}>
+          <AdminOperations subsection={subsection} />
+        </Panel>
+      )}
+      {section === "usage" && (
+        <Panel
+          title={
+            subsection === "ledger"
+              ? "Append-only usage ledger"
+              : subsection === "models"
+                ? "Usage by model"
+                : "Quota status"
+          }
+        >
+          <UsageManagement subsection={subsection} />
         </Panel>
       )}
       {!special &&
@@ -170,12 +214,14 @@ export function ProductPage({ section, subsection }: { section: string; subsecti
         section !== "usage" &&
         section !== "team" &&
         section !== "billing" &&
-        section !== "credits" && (
+        section !== "credits" &&
+        section !== "settings" &&
+        section !== "admin" && (
           <Panel title={section === "admin" ? "Service health" : "Recent activity"}>
             <DataRows rows={base.rows ?? []} />
           </Panel>
         )}
-      {(section === "dashboard" || section === "usage") && (
+      {(section === "dashboard" || (section === "usage" && !subsection)) && (
         <div className="dashboard-grid">
           <Panel title={section === "usage" ? "Daily token volume" : "Content momentum"}>
             <div className="chart">
@@ -215,9 +261,6 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
     <section className="panel">
       <div className="panel-title">
         <h2>{title}</h2>
-        <button aria-label="More options">
-          <MoreHorizontal />
-        </button>
       </div>
       {children}
     </section>

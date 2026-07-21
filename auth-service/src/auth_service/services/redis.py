@@ -65,13 +65,16 @@ class RedisService:
 
     async def revoke_session(self, jti: str, user_id: UUID) -> None:
         await self.client.delete(f"auth:session:{jti}")
-        await self.client.srem(f"auth:user_sessions:{user_id}", jti)
+        await cast(Awaitable[int], self.client.srem(f"auth:user_sessions:{user_id}", jti))
 
     async def revoke_user_sessions(self, user_id: UUID) -> None:
         user_key = f"auth:user_sessions:{user_id}"
         members = await cast(Awaitable[set[str]], self.client.smembers(user_key))
         if members:
-            await self.client.delete(*(f"auth:session:{jti}" for jti in members))
+            await cast(
+                Awaitable[int],
+                self.client.delete(*(f"auth:session:{jti}" for jti in members)),
+            )
         await self.client.delete(user_key)
 
     async def login_allowed(self, email: str, ip: str, limit: int) -> bool:

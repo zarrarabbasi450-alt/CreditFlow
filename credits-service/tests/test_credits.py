@@ -44,3 +44,21 @@ async def test_listing_validation(client: AsyncClient, seller_auth: dict[str, st
     assert insufficient.status_code == 409
     missing = await client.delete(f"/api/v1/credits/marketplace/listings/{uuid4()}", headers=seller_auth)
     assert missing.status_code == 404
+
+
+async def test_credit_consumption_is_atomic_and_idempotent(
+    client: AsyncClient, seller_auth: dict[str, str]
+) -> None:
+    reference_id = str(uuid4())
+    payload = {"amount": 750, "reference_id": reference_id, "description": "AI generation usage"}
+    first = await client.post("/api/v1/credits/consume", headers=seller_auth, json=payload)
+    repeated = await client.post("/api/v1/credits/consume", headers=seller_auth, json=payload)
+    assert first.status_code == 200 and first.json()["balance"] == 4250
+    assert repeated.status_code == 200 and repeated.json()["balance"] == 4250
+
+    insufficient = await client.post(
+        "/api/v1/credits/consume",
+        headers=seller_auth,
+        json={"amount": 999999, "reference_id": str(uuid4()), "description": "too much"},
+    )
+    assert insufficient.status_code == 409

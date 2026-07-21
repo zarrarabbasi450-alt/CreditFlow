@@ -44,9 +44,15 @@ export const login = async (data: LoginRequest): Promise<AuthSession> => {
 };
 export const logout = (refreshToken: string) =>
   request<void>({ url: "/auth/logout", method: "POST", data: { refreshToken } });
-export const refreshToken = async (refreshToken: string) =>
-  (await request<BackendAuthSession>({ url: "/auth/refresh", method: "POST", data: { refreshToken } }))
-    .tokens;
+export const refreshSession = async (refreshToken: string): Promise<AuthSession> => {
+  const session = await request<BackendAuthSession>({
+    url: "/auth/refresh",
+    method: "POST",
+    data: { refreshToken },
+  });
+  return { user: toUser(session.user), tokens: session.tokens };
+};
+export const refreshToken = async (refreshToken: string) => (await refreshSession(refreshToken)).tokens;
 export const switchAccount = async (accountId: string): Promise<AuthSession> => {
   const session = await request<BackendAuthSession>({
     url: "/auth/switch-account",
@@ -55,4 +61,5 @@ export const switchAccount = async (accountId: string): Promise<AuthSession> => 
   });
   return { user: toUser(session.user), tokens: session.tokens };
 };
-export const getCurrentUser = () => request<AuthSession["user"]>({ url: "/auth/me", method: "GET" });
+export const getCurrentUser = async (): Promise<AuthUser> =>
+  toUser(await request<BackendAuthUser>({ url: "/auth/me", method: "GET" }));

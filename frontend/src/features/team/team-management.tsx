@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import {
   getCurrentAccount,
+  listAccountInvites,
   listAccountMembers,
   removeAccountMember,
   updateAccountMemberRole,
@@ -16,7 +17,7 @@ import type { AccountRole, Role } from "@/types";
 const displayRole = (role: AccountRole): Role =>
   ({ owner: "Owner", admin: "Admin", member: "Member" })[role] as Role;
 
-export function TeamManagement() {
+export function TeamManagement({ subsection }: { subsection?: string }) {
   const { user } = useAuth();
   const client = useQueryClient();
   const [email, setEmail] = useState("");
@@ -27,11 +28,17 @@ export function TeamManagement() {
     queryFn: () => listAccountMembers(account.data!.id),
     enabled: Boolean(account.data),
   });
+  const invitations = useQuery({
+    queryKey: ["account-invites", account.data?.id],
+    queryFn: () => listAccountInvites(account.data!.id),
+    enabled: Boolean(account.data) && subsection === "invitations",
+  });
   const refresh = () => client.invalidateQueries({ queryKey: ["account-members", account.data?.id] });
   const invite = useMutation({
     mutationFn: () => inviteUser(email, role),
     onSuccess: () => {
       setEmail("");
+      void client.invalidateQueries({ queryKey: ["account-invites", account.data?.id] });
     },
   });
   const update = useMutation({
@@ -79,39 +86,59 @@ export function TeamManagement() {
       )}
       {invite.isSuccess && <p className="team-feedback">Invitation created and queued for delivery.</p>}
       {invite.error && <p className="team-error">{invite.error.message}</p>}
-      <div className="member-list">
-        {members.isLoading && <p>Loading members…</p>}
-        {members.data?.map((member) => (
-          <div key={member.id}>
-            <span>{member.user_id.slice(0, 2).toUpperCase()}</span>
-            <div>
-              <strong>{member.user_id === user?.id ? "You" : member.user_id}</strong>
-              <small>Active member · {displayRole(member.role)}</small>
+      {subsection === "invitations" && (
+        <div className="member-list">
+          {invitations.isLoading && <p>Loading invitations…</p>}
+          {invitations.data?.map((invitation) => (
+            <div key={invitation.id}>
+              <span>{invitation.email.slice(0, 2).toUpperCase()}</span>
+              <div>
+                <strong>{invitation.email}</strong>
+                <small>Expires {new Date(invitation.expires_at).toLocaleDateString()}</small>
+              </div>
+              <em>{invitation.accepted_at ? "Accepted" : invitation.role}</em>
             </div>
-            <select
-              value={member.role}
-              disabled={!canManageMember(member.role) || update.isPending}
-              onChange={(event) =>
-                update.mutate({ userId: member.user_id, nextRole: event.target.value as AccountRole })
-              }
-            >
-              {viewerRole !== "Admin" && <option value="owner">Owner</option>}
-              <option value="admin">Admin</option>
-              <option value="member">Member</option>
-            </select>
-            <button
-              aria-label={`Remove ${member.user_id}`}
-              disabled={!canManageMember(member.role) || member.user_id === user?.id || remove.isPending}
-              onClick={() => remove.mutate(member.user_id)}
-            >
-              <Trash2 />
-            </button>
-            <em>{displayRole(member.role)}</em>
-          </div>
-        ))}
-      </div>
-      {(members.error || update.error || remove.error) && (
-        <p className="team-error">{(members.error ?? update.error ?? remove.error)?.message}</p>
+          ))}
+          {!invitations.isLoading && !invitations.data?.length && <p>No invitations have been sent.</p>}
+        </div>
+      )}
+      {subsection !== "invitations" && (
+        <div className="member-list">
+          {members.isLoading && <p>Loading members…</p>}
+          {members.data?.map((member) => (
+            <div key={member.id}>
+              <span>{member.user_id.slice(0, 2).toUpperCase()}</span>
+              <div>
+                <strong>{member.user_id === user?.id ? "You" : member.user_id}</strong>
+                <small>Active member · {displayRole(member.role)}</small>
+              </div>
+              <select
+                value={member.role}
+                disabled={!canManageMember(member.role) || update.isPending}
+                onChange={(event) =>
+                  update.mutate({ userId: member.user_id, nextRole: event.target.value as AccountRole })
+                }
+              >
+                {viewerRole !== "Admin" && <option value="owner">Owner</option>}
+                <option value="admin">Admin</option>
+                <option value="member">Member</option>
+              </select>
+              <button
+                aria-label={`Remove ${member.user_id}`}
+                disabled={!canManageMember(member.role) || member.user_id === user?.id || remove.isPending}
+                onClick={() => remove.mutate(member.user_id)}
+              >
+                <Trash2 />
+              </button>
+              <em>{displayRole(member.role)}</em>
+            </div>
+          ))}
+        </div>
+      )}
+      {(members.error || invitations.error || update.error || remove.error) && (
+        <p className="team-error">
+          {(members.error ?? invitations.error ?? update.error ?? remove.error)?.message}
+        </p>
       )}
     </div>
   );

@@ -1,6 +1,7 @@
 import { request } from "./client";
 import type {
   Account,
+  AccountInvitation,
   AccountMember,
   AccountRole,
   AccountType,
@@ -12,6 +13,8 @@ import type {
 export const listAccounts = () => request<Account[]>({ url: "/accounts/my", method: "GET" });
 export const getAccount = (accountId: string) =>
   request<Account>({ url: `/accounts/${accountId}`, method: "GET" });
+export const updateAccount = (accountId: string, name: string) =>
+  request<Account>({ url: `/accounts/${accountId}`, method: "PATCH", data: { name } });
 export const createAccount = (data: {
   name: string;
   slug: string;
@@ -21,6 +24,8 @@ export const createAccount = (data: {
 }) => request<Account>({ url: "/accounts", method: "POST", data });
 export const listAccountMembers = (accountId: string) =>
   request<AccountMember[]>({ url: `/accounts/${accountId}/members`, method: "GET" });
+export const listAccountInvites = (accountId: string) =>
+  request<AccountInvitation[]>({ url: `/accounts/${accountId}/invites`, method: "GET" });
 export const updateAccountMemberRole = (accountId: string, userId: string, role: AccountRole) =>
   request<AccountMember>({
     url: `/accounts/${accountId}/members/${userId}`,

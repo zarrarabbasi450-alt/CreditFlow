@@ -7,6 +7,7 @@ from credits_service.api.dependencies import get_identity, require_owner
 from credits_service.models import CreditLedger
 from credits_service.schemas.credits import (
     BalanceResponse,
+    CreditConsumption,
     LedgerResponse,
     ListingCreate,
     ListingResponse,
@@ -65,6 +66,18 @@ async def balance(request: Request, actor: Actor) -> BalanceResponse:
 @router.get("/summary", response_model=BalanceResponse)
 async def summary(request: Request, actor: Actor) -> BalanceResponse:
     return await balance(request, actor)
+
+
+@router.post("/consume", response_model=BalanceResponse)
+async def consume_credits(payload: CreditConsumption, request: Request, actor: Actor) -> BalanceResponse:
+    remaining = await service(request).consume_credits(
+        actor.account_id,
+        actor.user_id,
+        payload.amount,
+        payload.reference_id,
+        payload.description,
+    )
+    return BalanceResponse(account_id=actor.account_id, balance=remaining)
 
 
 @router.get("/transactions", response_model=list[LedgerResponse])
