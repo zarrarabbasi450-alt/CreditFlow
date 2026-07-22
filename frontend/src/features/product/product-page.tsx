@@ -1,14 +1,17 @@
 "use client";
 import { motion } from "framer-motion";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowUpRight, CheckCircle2, Clock, Plus, Sparkles } from "lucide-react";
+import { ArrowUpRight, CheckCircle2, Clock, Image as ImageIcon, Plus, Sparkles, Square } from "lucide-react";
+import Image from "next/image";
 import { useState } from "react";
+import ReactMarkdown from "react-markdown";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { RecurringScheduleForm } from "@/features/scheduler/recurring-form";
 import { LinkedInImageForm } from "@/features/publishing/linkedin-image-form";
-import { streamGeneration } from "@/lib/api/content";
+import { cancelGeneration, generateImage, streamGeneration } from "@/lib/api/content";
 import { useToast } from "@/components/toast";
 import { useProductView } from "@/hooks/useProductView";
+import { usePromptHistory } from "@/hooks/useAI";
 import { TeamManagement } from "@/features/team/team-management";
 import { BillingManagement } from "@/features/billing/billing-management";
 import { CreditsManagement } from "@/features/credits/credits-management";
@@ -22,6 +25,7 @@ function SectionTabs({ section, subsection }: { section: string; subsection?: st
     credits: ["Overview", "Ledger", "Marketplace"],
     scheduler: ["Calendar", "Recurring"],
     publishing: ["Overview", "LinkedIn", "LinkedIn image", "History"],
+    "ai-studio": ["Composer", "Chat history", "Images"],
     settings: ["Account", "Sessions", "API keys"],
     team: ["Members", "Invitations"],
     usage: ["Overview", "Ledger", "Models"],
@@ -31,7 +35,7 @@ function SectionTabs({ section, subsection }: { section: string; subsection?: st
     <div className="tabs">
       {tabs[section].map((tab) => {
         const slug = tab.toLowerCase().replaceAll(" ", "-");
-        const root = tab === "Overview" || tab === "Calendar";
+        const root = tab === "Overview" || tab === "Calendar" || tab === "Composer";
         return (
           <a
             key={tab}
@@ -47,9 +51,14 @@ function SectionTabs({ section, subsection }: { section: string; subsection?: st
 }
 export function ProductPage({ section, subsection }: { section: string; subsection?: string }) {
   const { data: base, isLoading, error, refetch } = useProductView(section);
+  const history = usePromptHistory(section === "ai-studio");
   const queryClient = useQueryClient();
   const { notify } = useToast();
   const [prompt, setPrompt] = useState("");
+  const [model, setModel] = useState<"fast" | "quality">("fast");
+  const [includeImage, setIncludeImage] = useState(false);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [output, setOutput] = useState("");
   const [generating, setGenerating] = useState(false);
   const special =
@@ -64,9 +73,42 @@ export function ProductPage({ section, subsection }: { section: string; subsecti
     if (!prompt.trim()) return;
     setGenerating(true);
     setOutput("");
-    for await (const chunk of streamGeneration(prompt))
-      if (chunk.type === "token") setOutput((value) => value + chunk.value);
+    setImageUrl(null);
+    try {
+      for await (const chunk of streamGeneration({ prompt, model, generateImage: includeImage })) {
+        setCurrentJobId(chunk.generationId);
+        if (chunk.type === "token") setOutput((value) => value + chunk.value);
+        if (chunk.type === "complete" && chunk.imageUrl) setImageUrl(chunk.imageUrl);
+        if (chunk.type === "failed") throw new Error(chunk.value);
+        if (chunk.type === "cancelled") {
+          setOutput((value) => value + `\n${chunk.value}`);
+          notify("Generation cancelled");
+          return;
+        }
+      }
+      await Promise.all([
+        history.refetch(),
+        queryClient.invalidateQueries({ queryKey: ["usage"] }),
+        queryClient.invalidateQueries({ queryKey: ["product-view", "usage"] }),
+      ]);
+      notify("Generation completed");
+    } catch (generationError) {
+      notify(generationError instanceof Error ? generationError.message : "Generation failed");
+    } finally {
+      setGenerating(false);
+    }
+  }
+  async function cancelCurrentGeneration() {
+    if (!currentJobId) return;
+    await cancelGeneration(currentJobId);
     setGenerating(false);
+    notify("Generation cancellation requested");
+  }
+  async function createImage() {
+    if (!prompt.trim()) return;
+    const image = await generateImage(prompt);
+    setImageUrl(image.imageUrl);
+    notify("Image generated");
   }
   if (isLoading || !base)
     return (
@@ -139,7 +181,38 @@ export function ProductPage({ section, subsection }: { section: string; subsecti
           <LinkedInImageForm />
         </Panel>
       )}
-      {special === "ai" && (
+      {special === "ai" && subsection === "chat-history" && (
+        <Panel title="Chat history">
+          <div className="data-rows history-rows">
+            {history.isLoading && <p>Loading prompt history...</p>}
+            {!history.isLoading && (history.data ?? []).length === 0 && <p>No prompt history yet.</p>}
+            {(history.data ?? []).map((item) => (
+              <div key={item.id}>
+                <div>
+                  <strong>{item.prompt}</strong>
+                  <small>
+                    {item.model} · {item.totalTokens.toLocaleString()} tokens · $
+                    {(item.costMicrousd / 1_000_000).toFixed(4)}
+                  </small>
+                  <div className="history-response">
+                    <ReactMarkdown>{item.response || "_No response stored for this generation._"}</ReactMarkdown>
+                  </div>
+                </div>
+                <em>{new Date(item.createdAt).toLocaleString()}</em>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      )}
+      {special === "ai" && subsection === "images" && (
+        <Panel title="Generated images">
+          <div className="empty-state">
+            <ImageIcon />
+            <p>Image history storage is prepared in the AI service. Generate an image from Composer first.</p>
+          </div>
+        </Panel>
+      )}
+      {special === "ai" && !subsection && (
         <div className="studio-grid">
           <Panel title="Generation brief">
             <div className="generator">
@@ -152,11 +225,26 @@ export function ProductPage({ section, subsection }: { section: string; subsecti
                 placeholder="A LinkedIn post announcing our new analytics workspace…"
               />
               <label htmlFor="model">Model</label>
-              <select id="model">
-                <option>Claude 3.7 Sonnet</option>
-                <option>GPT-4.1</option>
-                <option>Gemini 2.5 Pro</option>
+              <select id="model" value={model} onChange={(event) => setModel(event.target.value as "fast" | "quality")}>
+                <option value="fast">Fast draft</option>
+                <option value="quality">Quality draft</option>
               </select>
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={includeImage}
+                  onChange={(event) => setIncludeImage(event.target.checked)}
+                />
+                Generate image for this post
+              </label>
+              <button className="secondary-button" disabled={!generating || !currentJobId} onClick={cancelCurrentGeneration}>
+                <Square />
+                Cancel generation
+              </button>
+              <button className="secondary-button" disabled={!prompt.trim()} onClick={createImage}>
+                <ImageIcon />
+                Generate image only
+              </button>
               <button className="primary-button" disabled={generating} onClick={generate}>
                 <Sparkles />
                 {generating ? "Generating…" : "Generate content"}
@@ -165,8 +253,42 @@ export function ProductPage({ section, subsection }: { section: string; subsecti
           </Panel>
           <Panel title="Streaming output">
             <div className="output">
-              {output ||
-                "Your generated content will appear here token by token. Usage and credit cost are recorded with every run."}
+              {output ? (
+                <ReactMarkdown>{output}</ReactMarkdown>
+              ) : (
+                "Your generated content will appear here token by token. Usage and credit cost are recorded with every run."
+              )}
+              {imageUrl && (
+                <div className="generated-image-card">
+                  <Image
+                    src={imageUrl}
+                    alt="Generated visual for this post"
+                    width={900}
+                    height={520}
+                    unoptimized
+                  />
+                  <a className="image-link" href={imageUrl} target="_blank" rel="noreferrer">
+                    Open full-size generated image
+                  </a>
+                </div>
+              )}
+            </div>
+          </Panel>
+          <Panel title="Prompt history">
+            <div className="data-rows">
+              {history.isLoading && <p>Loading prompt historyâ€¦</p>}
+              {!history.isLoading && (history.data ?? []).length === 0 && <p>No prompt history yet.</p>}
+              {(history.data ?? []).slice(0, 5).map((item) => (
+                <div key={item.id}>
+                  <div>
+                    <strong>{item.prompt}</strong>
+                    <small>
+                      {item.model} Â· {item.totalTokens.toLocaleString()} tokens
+                    </small>
+                  </div>
+                  <em>{new Date(item.createdAt).toLocaleDateString()}</em>
+                </div>
+              ))}
             </div>
           </Panel>
         </div>

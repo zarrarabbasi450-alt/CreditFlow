@@ -20,21 +20,25 @@ permissions:
 jobs:
   release-source:
     name: Release source policy
-    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Require dev as the release source
         env:
+          BASE_BRANCH: ${{ github.base_ref }}
           HEAD_BRANCH: ${{ github.head_ref }}
         run: |
-          if [ "$HEAD_BRANCH" != "dev" ]; then
+          if [ "$BASE_BRANCH" = "main" ] && [ "$HEAD_BRANCH" != "dev" ]; then
             echo "Pull requests to main must come from dev."
             exit 1
           fi
+          echo "Release source policy satisfied."
 
   backend:
     name: ${{ matrix.service }} checks
     runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: src
     strategy:
       fail-fast: false
       matrix:
@@ -45,6 +49,7 @@ jobs:
           - billing-service
           - credits-service
           - usage-service
+          - ai-generation-service
     defaults:
       run:
         working-directory: ${{ matrix.service }}

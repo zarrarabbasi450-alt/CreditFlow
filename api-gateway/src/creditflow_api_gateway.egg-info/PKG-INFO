@@ -11,6 +11,6 @@ Requires-Dist: redis==6.4.0
 Requires-Dist: aio-pika==9.5.7
 Requires-Dist: PyJWT[crypto]==2.10.1
 Requires-Dist: cryptography==45.0.6
-Requires-Dist: stripe==12.4.0
+Requires-Dist: stripe==12.5.1
 Requires-Dist: orjson==3.11.2
 Requires-Dist: python-json-logger==3.3.0
