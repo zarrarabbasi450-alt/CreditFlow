@@ -165,25 +165,34 @@ const toGenerationPayload = (payload: GenerationRequest) => ({
 });
 
 export const getContent = async () => {
-  const response = await request<{ view: ProductView; items: RawContentItem[] }>({ url: "/content", method: "GET" });
+  const response = await request<{ view: ProductView; items: RawContentItem[] }>({
+    url: "/content",
+    method: "GET",
+  });
   return { ...response, items: response.items.map(toContentItem) };
 };
+
 export const createContent = (payload: ContentPayload) =>
   request<RawContentItem>({
     url: "/content",
     method: "POST",
     data: toContentPayload({ ...payload, contentType: payload.contentType ?? "post" }),
   }).then(toContentItem);
+
 export const updateContent = (contentId: string, payload: Partial<ContentPayload>) =>
   request<RawContentItem>({ url: `/content/${contentId}`, method: "PATCH", data: toContentPayload(payload) }).then(
     toContentItem,
   );
+
 export const deleteContent = (contentId: string) =>
   request<{ message: string }>({ url: `/content/${contentId}`, method: "DELETE" });
+
 export const approveContent = (contentId: string) =>
   request<RawContentItem>({ url: `/content/${contentId}/approve`, method: "POST" }).then(toContentItem);
+
 export const publishContent = (contentId: string) =>
   request<RawContentItem>({ url: `/content/${contentId}/publish`, method: "POST" }).then(toContentItem);
+
 export const uploadContentImage = async (contentId: string, file: File) => {
   const form = new FormData();
   form.append("file", file);
@@ -193,6 +202,7 @@ export const uploadContentImage = async (contentId: string, file: File) => {
   if (!response.data.success) throw new Error(response.data.error.message);
   return toContentItem(response.data.data);
 };
+
 export const getAiOverview = () => request<ProductView>({ url: "/ai/overview", method: "GET" });
 export const getPromptHistory = async () =>
   (await request<RawPromptHistory[]>({ url: "/ai/history", method: "GET" })).map(toPromptHistory);
@@ -201,9 +211,7 @@ export const getGeneration = (jobId: string) =>
 export const cancelGeneration = (jobId: string) =>
   request<{ status: string }>({ url: `/ai/generations/${jobId}/cancel`, method: "POST" });
 export const generateImage = (prompt: string) =>
-  request<RawImageGeneration>({ url: "/ai/images", method: "POST", data: { prompt } }).then(
-    toImageGeneration,
-  );
+  request<RawImageGeneration>({ url: "/ai/images", method: "POST", data: { prompt } }).then(toImageGeneration);
 
 const sleep = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
