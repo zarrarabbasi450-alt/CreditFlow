@@ -204,10 +204,19 @@ class GenerationService:
         completion_tokens = max(1, len(response.split()) * 2)
         total_tokens = prompt_tokens + completion_tokens
         cost = total_tokens * self.settings.model_cost(model) // 1000
+        image_url: str | None = None
         async with self.sessions() as session, session.begin():
             job = await session.get(GenerationJob, job_id)
             if job is None:
                 raise AIServiceError(404, "GENERATION_NOT_FOUND", "Generation job was not found")
+            image_url = await session.scalar(
+                select(ImageGenerationJob.image_url)
+                .where(ImageGenerationJob.account_id == account_id)
+                .where(ImageGenerationJob.user_id == user_id)
+                .where(ImageGenerationJob.prompt == prompt)
+                .order_by(ImageGenerationJob.created_at.desc())
+                .limit(1)
+            )
             job.status = "completed"
             job.response = response
             job.prompt_tokens = prompt_tokens
@@ -232,6 +241,11 @@ class GenerationService:
             account_id=account_id,
             user_id=user_id,
             model=model,
+            generation_type="post",
+            prompt=prompt,
+            response=response,
+            image_url=image_url,
+            image_asset_ref=image_url,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,

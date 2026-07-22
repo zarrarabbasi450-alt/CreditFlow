@@ -1,6 +1,9 @@
-import { request } from "./client";
+import { apiClient, request } from "./client";
 import type {
+  ApiResponse,
   ContentItem,
+  ContentStatus,
+  ContentType,
   GenerationChunk,
   GenerationJob,
   GenerationRequest,
@@ -53,6 +56,31 @@ interface RawImageGeneration {
   status: string;
 }
 
+interface RawContentItem {
+  id: string;
+  account_id: string;
+  created_by: string;
+  title: string;
+  body: string;
+  content_type: ContentType;
+  status: ContentStatus;
+  image_url?: string | null;
+  image_asset_ref?: string | null;
+  source_generation_id?: string | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
+  published_at?: string | null;
+}
+
+export interface ContentPayload {
+  title: string;
+  body: string;
+  contentType?: ContentType;
+  imageUrl?: string | null;
+  imageAssetRef?: string | null;
+}
+
 const toGenerationStart = (value: RawGenerationStart): GenerationStart => ({
   jobId: value.job_id,
   channel: value.channel,
@@ -96,6 +124,39 @@ const toImageGeneration = (value: RawImageGeneration): ImageGeneration => ({
   status: value.status,
 });
 
+const toContentItem = (value: RawContentItem): ContentItem => ({
+  id: value.id,
+  accountId: value.account_id,
+  createdBy: value.created_by,
+  title: value.title,
+  body: value.body,
+  contentType: value.content_type,
+  status: value.status,
+  imageUrl: value.image_url ?? null,
+  imageAssetRef: value.image_asset_ref ?? null,
+  sourceGenerationId: value.source_generation_id ?? null,
+  version: value.version,
+  createdAt: value.created_at,
+  updatedAt: value.updated_at,
+  publishedAt: value.published_at ?? null,
+});
+
+const toContentPayload = (payload: Partial<ContentPayload>) => {
+  const data: {
+    title?: string;
+    body?: string;
+    content_type?: ContentType;
+    image_url?: string | null;
+    image_asset_ref?: string | null;
+  } = {};
+  if (payload.title !== undefined) data.title = payload.title;
+  if (payload.body !== undefined) data.body = payload.body;
+  if (payload.contentType !== undefined) data.content_type = payload.contentType;
+  if (payload.imageUrl !== undefined) data.image_url = payload.imageUrl;
+  if (payload.imageAssetRef !== undefined) data.image_asset_ref = payload.imageAssetRef;
+  return data;
+};
+
 const toGenerationPayload = (payload: GenerationRequest) => ({
   prompt: payload.prompt,
   model: payload.model,
@@ -103,8 +164,35 @@ const toGenerationPayload = (payload: GenerationRequest) => ({
   estimated_tokens: payload.estimatedTokens,
 });
 
-export const getContent = () =>
-  request<{ view: ProductView; items: ContentItem[] }>({ url: "/content", method: "GET" });
+export const getContent = async () => {
+  const response = await request<{ view: ProductView; items: RawContentItem[] }>({ url: "/content", method: "GET" });
+  return { ...response, items: response.items.map(toContentItem) };
+};
+export const createContent = (payload: ContentPayload) =>
+  request<RawContentItem>({
+    url: "/content",
+    method: "POST",
+    data: toContentPayload({ ...payload, contentType: payload.contentType ?? "post" }),
+  }).then(toContentItem);
+export const updateContent = (contentId: string, payload: Partial<ContentPayload>) =>
+  request<RawContentItem>({ url: `/content/${contentId}`, method: "PATCH", data: toContentPayload(payload) }).then(
+    toContentItem,
+  );
+export const deleteContent = (contentId: string) =>
+  request<{ message: string }>({ url: `/content/${contentId}`, method: "DELETE" });
+export const approveContent = (contentId: string) =>
+  request<RawContentItem>({ url: `/content/${contentId}/approve`, method: "POST" }).then(toContentItem);
+export const publishContent = (contentId: string) =>
+  request<RawContentItem>({ url: `/content/${contentId}/publish`, method: "POST" }).then(toContentItem);
+export const uploadContentImage = async (contentId: string, file: File) => {
+  const form = new FormData();
+  form.append("file", file);
+  const response = await apiClient.post<ApiResponse<RawContentItem>>(`/content/${contentId}/image`, form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  if (!response.data.success) throw new Error(response.data.error.message);
+  return toContentItem(response.data.data);
+};
 export const getAiOverview = () => request<ProductView>({ url: "/ai/overview", method: "GET" });
 export const getPromptHistory = async () =>
   (await request<RawPromptHistory[]>({ url: "/ai/history", method: "GET" })).map(toPromptHistory);

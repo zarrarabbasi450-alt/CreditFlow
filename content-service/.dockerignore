@@ -1,0 +1,9 @@
+.env
+.coverage
+.mypy_cache
+.pytest_cache
+.pytest-tmp
+.ruff_cache
+__pycache__
+tests
+uploads

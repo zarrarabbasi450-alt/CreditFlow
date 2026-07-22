@@ -18,6 +18,11 @@ class GenerationCompletedPayload(BaseModel):
     account_id: UUID
     user_id: UUID
     model: str
+    generation_type: str = "post"
+    prompt: str
+    response: str
+    image_url: str | None = None
+    image_asset_ref: str | None = None
     prompt_tokens: int = Field(ge=0)
     completion_tokens: int = Field(ge=0)
     total_tokens: int = Field(gt=0)

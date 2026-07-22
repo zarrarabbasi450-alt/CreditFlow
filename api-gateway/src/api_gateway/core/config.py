@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     credits_marketplace_service_url: str = "http://localhost:8004"
     usage_metering_service_url: str = "http://localhost:8005"
     ai_generation_service_url: str = "http://localhost:8006"
-    content_service_url: str = "http://localhost:8107"
+    content_service_url: str = "http://localhost:8007"
     scheduler_service_url: str = "http://localhost:8108"
     social_publishing_service_url: str = "http://localhost:8109"
     scraper_service_url: str = "http://localhost:8110"

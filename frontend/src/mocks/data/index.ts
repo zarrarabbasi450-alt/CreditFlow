@@ -275,12 +275,24 @@ export const users: User[] = credentials.map((item, index) => ({
 export const contentItems: ContentItem[] = productViews.content.rows!.map((row, index) => ({
   id: `content_${index + 1}`,
   accountId: "tenant_orion",
+  createdBy: "user_1",
   title: row.title,
-  type: ["LinkedIn post", "Campaign brief", "Article", "LinkedIn carousel"][index] as ContentItem["type"],
+  body: `Draft body for ${row.title}.`,
+  contentType: (["post", "campaign_brief", "article", "carousel"] as const)[index] ?? "post",
   owner: row.detail.split(" · ")[1],
-  status: row.status as ContentItem["status"],
+  status:
+    row.status === "Approved"
+      ? "approved"
+      : row.status === "Published" || row.status === "Scheduled"
+        ? "published"
+        : "draft",
   tags: ["campaign"],
+  imageUrl: null,
+  imageAssetRef: null,
+  sourceGenerationId: null,
+  createdAt: "2026-07-15T10:00:00Z",
   updatedAt: "2026-07-15T10:00:00Z",
+  publishedAt: row.status === "Scheduled" ? "2026-07-16T10:00:00Z" : null,
   version: index + 1,
 }));
 export const schedules: Schedule[] = [

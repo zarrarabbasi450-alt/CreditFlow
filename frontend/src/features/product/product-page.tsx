@@ -18,6 +18,7 @@ import { CreditsManagement } from "@/features/credits/credits-management";
 import { AdminOperations } from "@/features/admin/operations";
 import { AccountSettings } from "@/features/settings/account-settings";
 import { UsageManagement } from "@/features/usage/usage-management";
+import { ContentManagement } from "@/features/content/content-management";
 import type { ActivityRow } from "@/types";
 function SectionTabs({ section, subsection }: { section: string; subsection?: string }) {
   const tabs: Record<string, string[]> = {
@@ -26,6 +27,7 @@ function SectionTabs({ section, subsection }: { section: string; subsection?: st
     scheduler: ["Calendar", "Recurring"],
     publishing: ["Overview", "LinkedIn", "LinkedIn image", "History"],
     "ai-studio": ["Composer", "Chat history", "Images"],
+    content: ["Overview", "Drafts", "Approved", "Published"],
     settings: ["Account", "Sessions", "API keys"],
     team: ["Members", "Invitations"],
     usage: ["Overview", "Ledger", "Models"],
@@ -134,6 +136,10 @@ export function ProductPage({ section, subsection }: { section: string; subsecti
       void Promise.all([refetch(), queryClient.invalidateQueries({ queryKey: ["usage"] })]).then(() =>
         notify("Usage refreshed"),
       );
+      return;
+    }
+    if (section === "content") {
+      document.getElementById("content-title")?.focus();
       return;
     }
     notify(`${base.action} action opened`);
@@ -331,9 +337,15 @@ export function ProductPage({ section, subsection }: { section: string; subsecti
           <UsageManagement subsection={subsection} />
         </Panel>
       )}
+      {section === "content" && (
+        <Panel title="Content library">
+          <ContentManagement subsection={subsection} />
+        </Panel>
+      )}
       {!special &&
         section !== "dashboard" &&
         section !== "usage" &&
+        section !== "content" &&
         section !== "team" &&
         section !== "billing" &&
         section !== "credits" &&

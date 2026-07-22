@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "creditflow-content-service"
+version = "0.1.0"
+requires-python = ">=3.14"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S"]
+ignore = ["S101"]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+plugins = ["sqlalchemy.ext.mypy.plugin"]
+mypy_path = "src"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "--basetemp=.pytest-tmp --cov=src/content_service --cov-report=term-missing --cov-fail-under=80"

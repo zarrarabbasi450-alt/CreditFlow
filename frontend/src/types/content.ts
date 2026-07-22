@@ -1,12 +1,20 @@
+export type ContentStatus = "draft" | "approved" | "published";
+export type ContentType = "post" | "article" | "campaign_brief" | "carousel";
+
 export interface ContentItem {
   id: string;
   accountId: string;
+  createdBy: string;
   title: string;
-  type: "LinkedIn post" | "Campaign brief" | "Article" | "LinkedIn carousel";
-  owner: string;
-  status: "Draft" | "Review" | "Approved" | "Scheduled";
-  tags: string[];
+  body: string;
+  contentType: ContentType;
+  status: ContentStatus;
+  imageUrl?: string | null;
+  imageAssetRef?: string | null;
+  sourceGenerationId?: string | null;
+  createdAt: string;
   updatedAt: string;
+  publishedAt?: string | null;
   version: number;
 }
 export interface GenerationRequest {
