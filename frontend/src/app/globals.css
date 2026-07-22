@@ -1568,6 +1568,23 @@ button {
   font-style: normal;
   white-space: nowrap;
 }
+.history-rows > div {
+  align-items: flex-start;
+}
+.history-response {
+  margin-top: 14px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--soft);
+  color: var(--muted);
+}
+.history-response :is(p, ul, ol) {
+  margin: 0 0 10px;
+}
+.history-response :last-child {
+  margin-bottom: 0;
+}
 .workflow-form {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1613,6 +1630,15 @@ button {
 .generator .primary-button {
   margin-top: 5px;
 }
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--muted);
+}
+.toggle-row input {
+  width: auto;
+}
 .output {
   min-height: 350px;
   padding: 24px;
@@ -1621,6 +1647,58 @@ button {
     400 15px/1.8 Georgia,
     serif;
   white-space: pre-wrap;
+}
+.output :is(h1, h2, h3) {
+  margin: 0 0 12px;
+  color: var(--ink);
+  font-family: Georgia, serif;
+  line-height: 1.15;
+}
+.output :is(p, ul, ol, blockquote) {
+  margin: 0 0 14px;
+}
+.output :is(ul, ol) {
+  padding-left: 22px;
+}
+.output li {
+  margin-bottom: 6px;
+}
+.output strong {
+  color: var(--ink);
+}
+.output a {
+  color: var(--violet);
+  font-weight: 700;
+}
+.output code {
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--soft);
+  color: var(--ink);
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+.image-link {
+  display: inline-flex;
+  margin-top: 18px;
+  color: var(--violet);
+  font: 700 12px/1 Inter, sans-serif;
+}
+.generated-image-card {
+  display: grid;
+  gap: 10px;
+  margin-top: 22px;
+}
+.generated-image-card img {
+  width: 100%;
+  max-height: 320px;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  box-shadow: 0 18px 45px rgba(87, 69, 169, 0.14);
+}
+.generated-image-card .image-link {
+  margin-top: 0;
 }
 .modal-backdrop {
   position: fixed;

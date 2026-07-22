@@ -5,6 +5,7 @@ src/api_gateway/main.py
 src/api_gateway/api/__init__.py
 src/api_gateway/api/dependencies.py
 src/api_gateway/api/routes/__init__.py
+src/api_gateway/api/routes/admin.py
 src/api_gateway/api/routes/dashboard.py
 src/api_gateway/api/routes/operations.py
 src/api_gateway/api/routes/proxy.py
