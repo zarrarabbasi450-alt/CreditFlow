@@ -4,10 +4,11 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import desc, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from content_service.core.errors import ContentError
-from content_service.models import Content, ContentVersion
+from content_service.models import Content, ContentVersion, ProcessedEvent
 from content_service.schemas.content import (
     ContentCollection,
     ContentCreate,
@@ -111,8 +112,10 @@ class ContentService:
             item = await self._get_scoped(session, content_id, identity)
             if item.status == "published":
                 raise ContentError(409, "CONTENT_LOCKED", "Published content cannot be deleted")
+            account_id = item.account_id
             await session.delete(item)
             await session.commit()
+        await self._publish_deleted(content_id, account_id)
         return {"message": "Content deleted"}
 
     async def approve(self, content_id: UUID, identity: Identity) -> ContentRead:
@@ -135,8 +138,29 @@ class ContentService:
         )
 
     async def consume(self, event: dict[str, Any]) -> None:
-        if event.get("event_type") != "ai.generation_completed":
+        event_type = event.get("event_type")
+        if event_type not in {"ai.generation_completed", "ai.generation_deleted"}:
             raise ContentError(400, "UNSUPPORTED_EVENT", "Content Service only consumes AI completion events")
+        raw_event_id = event.get("event_id") or event.get("id")
+        event_id = UUID(str(raw_event_id)) if raw_event_id else None
+        if event_id is not None:
+            async with self.sessions() as session:
+                if await session.scalar(
+                    select(ProcessedEvent.id).where(ProcessedEvent.event_id == event_id)
+                ):
+                    return
+        if event_type == "ai.generation_deleted":
+            await self._handle_generation_deleted(event)
+        else:
+            await self._handle_generation_completed(event)
+        if event_id is not None:
+            try:
+                async with self.sessions() as session, session.begin():
+                    session.add(ProcessedEvent(event_id=event_id, event_type=event_type))
+            except IntegrityError:
+                pass
+
+    async def _handle_generation_completed(self, event: dict[str, Any]) -> None:
         payload = dict(event.get("payload") or {})
         generation_type = str(payload.get("generation_type", payload.get("content_type", "post")))
         if generation_type != "post":
@@ -171,6 +195,24 @@ class ContentService:
             await session.commit()
             await session.refresh(item)
         await self._publish("content.created", item)
+
+    async def _handle_generation_deleted(self, event: dict[str, Any]) -> None:
+        payload = dict(event.get("payload") or {})
+        generation_id_raw = payload.get("generation_id")
+        if not generation_id_raw:
+            return
+        generation_id = UUID(str(generation_id_raw))
+        async with self.sessions() as session:
+            item = await session.scalar(
+                select(Content).where(Content.source_generation_id == generation_id).limit(1)
+            )
+            if item is None or item.status == "published":
+                return
+            content_id = item.id
+            account_id = item.account_id
+            await session.delete(item)
+            await session.commit()
+        await self._publish_deleted(content_id, account_id)
 
     async def _transition(
         self,
@@ -256,5 +298,13 @@ class ContentService:
                     "image_url": item.image_url,
                     "image_asset_ref": item.image_asset_ref,
                 },
+            )
+        )
+
+    async def _publish_deleted(self, content_id: UUID, account_id: UUID) -> None:
+        await self.events.publish(
+            EventEnvelope(
+                event_type="content.deleted",
+                payload={"content_id": str(content_id), "account_id": str(account_id)},
             )
         )

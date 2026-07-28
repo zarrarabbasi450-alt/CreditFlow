@@ -2,7 +2,7 @@ import hashlib
 import re
 import secrets
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import select
@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from tenant_service.core.errors import TenantError
-from tenant_service.models import Account, AccountMember, AccountType, Invite, MemberRole
+from tenant_service.models import Account, AccountMember, AccountType, Invite, MemberRole, ProcessedEvent
 from tenant_service.schemas.accounts import AccountCreate, AccountUpdate, InviteCreate
 from tenant_service.services.identity import Identity
 from tenant_service.services.rabbitmq import EventPublisherProtocol
@@ -87,11 +87,29 @@ class AccountService:
                 {"account_id": str(account.id), "name": account.name, "type": account.type},
             )
 
-    async def handle_event(self, event_type: str, payload: dict[str, Any]) -> None:
+    async def handle_event(self, event_id: str, event_type: str, payload: dict[str, Any]) -> None:
+        try:
+            parsed_event_id: UUID | None = UUID(event_id)
+        except ValueError:
+            parsed_event_id = None
+        if parsed_event_id is not None:
+            async with self.sessions() as session:
+                if await session.scalar(
+                    select(ProcessedEvent.id).where(ProcessedEvent.event_id == parsed_event_id)
+                ):
+                    return
         if event_type == "user.registered":
             await self.handle_user_registered(payload)
         elif event_type == "invoice.paid":
             await self.handle_invoice_paid(payload)
+        else:
+            return
+        if parsed_event_id is not None:
+            try:
+                async with self.sessions() as session, session.begin():
+                    session.add(ProcessedEvent(event_id=parsed_event_id, event_type=event_type))
+            except IntegrityError:
+                pass
 
     async def handle_invoice_paid(self, payload: dict[str, Any]) -> None:
         try:
@@ -132,6 +150,34 @@ class AccountService:
             {"account_id": str(account_id), "name": account.name},
         )
         return account
+
+    async def get_owner_user_id(self, account_id: UUID) -> UUID | None:
+        async with self.sessions() as session:
+            return cast(
+                UUID | None,
+                await session.scalar(
+                    select(AccountMember.user_id).where(
+                        AccountMember.account_id == account_id,
+                        AccountMember.role == MemberRole.OWNER,
+                    )
+                ),
+            )
+
+    async def get_summary(self, account_id: UUID) -> tuple[Account, int] | None:
+        async with self.sessions() as session:
+            account = await session.get(Account, account_id)
+            if account is None:
+                return None
+            member_count = len(
+                list(
+                    (
+                        await session.scalars(
+                            select(AccountMember.id).where(AccountMember.account_id == account_id)
+                        )
+                    ).all()
+                )
+            )
+            return account, member_count
 
     async def list_for_user(self, actor: Identity, *, all_accounts: bool = False) -> list[Account]:
         async with self.sessions() as session:
@@ -213,6 +259,15 @@ class AccountService:
             expires_at=datetime.now(UTC) + timedelta(days=7),
         )
         async with self.sessions() as session, session.begin():
+            account = await session.get(Account, account_id)
+            if account is None:
+                raise TenantError(404, "ACCOUNT_NOT_FOUND", "Account was not found")
+            if account.type == AccountType.INDIVIDUAL:
+                raise TenantError(
+                    409,
+                    "INDIVIDUAL_ACCOUNT_SINGLE_MEMBER",
+                    "Individual accounts may only have one member — create a Team account to invite others",
+                )
             manager = await self._manager(session, account_id, actor)
             if (
                 not actor.is_superadmin

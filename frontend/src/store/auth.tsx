@@ -9,30 +9,27 @@ type Auth = {
   tenant: TenantSummary | null;
   workspace: WorkspaceSummary | null;
   ready: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  signup: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<AuthUser>;
+  signup: (email: string, password: string) => Promise<AuthUser>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   switchAccount: (accountId: string) => Promise<void>;
 };
 const Context = createContext<Auth | null>(null);
-const storageKey = "creditflow_auth_session";
 let hydrationPromise: Promise<AuthSession | null> | null = null;
 
+// The access token lives in memory only, so a hard reload always starts with none.
+// The httpOnly refresh-token cookie (set by the gateway) is what survives — this
+// exchanges it for a fresh access token and the current user, or fails silently
+// (session cookie missing/expired) leaving the visitor logged out.
 function hydrateSession(): Promise<AuthSession | null> {
   hydrationPromise ??= (async () => {
-    const raw = localStorage.getItem(storageKey);
-    if (!raw) return null;
     try {
-      const stored = JSON.parse(raw) as AuthSession;
-      tokenStore.set(stored.tokens);
-      const fresh = await authApi.refreshSession(stored.tokens.refreshToken);
+      const fresh = await authApi.refreshSession();
       tokenStore.set(fresh.tokens);
-      localStorage.setItem(storageKey, JSON.stringify(fresh));
       return fresh;
     } catch {
       tokenStore.clear();
-      localStorage.removeItem(storageKey);
       return null;
     }
   })();
@@ -60,13 +57,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const persist = (next: AuthSession | null) => {
     hydrationPromise = Promise.resolve(next);
     setSession(next);
-    if (next) {
-      localStorage.setItem(storageKey, JSON.stringify(next));
-      tokenStore.set(next.tokens);
-    } else {
-      localStorage.removeItem(storageKey);
-      tokenStore.clear();
-    }
+    if (next) tokenStore.set(next.tokens);
+    else tokenStore.clear();
   };
   const value = useMemo<Auth>(
     () => ({
@@ -75,21 +67,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       tenant: session?.user.tenant ?? null,
       workspace: session?.user.workspace ?? null,
       ready,
-      login: async (email, password) => persist(await authApi.login({ email, password })),
+      login: async (email, password) => {
+        const next = await authApi.login({ email, password });
+        persist(next);
+        return next.user;
+      },
       signup: async (email, password) => {
         await authApi.signup({ email, password });
-        persist(await authApi.login({ email, password }));
+        const next = await authApi.login({ email, password });
+        persist(next);
+        return next.user;
       },
       logout: async () => {
         try {
-          if (session) await authApi.logout(session.tokens.refreshToken);
+          if (session) await authApi.logout();
         } finally {
           persist(null);
         }
       },
       refresh: async () => {
         if (!session) return;
-        persist(await authApi.refreshSession(session.tokens.refreshToken));
+        persist(await authApi.refreshSession());
       },
       switchAccount: async (accountId) => persist(await authApi.switchAccount(accountId)),
     }),

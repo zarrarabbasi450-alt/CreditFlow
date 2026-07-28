@@ -7,6 +7,7 @@ from auth_service.schemas.auth import (
     AdminUserResponse,
     AuthUserResponse,
     ForgotPasswordRequest,
+    InternalUserResponse,
     LoginRequest,
     LoginResponse,
     LoginSuccessResponse,
@@ -22,6 +23,7 @@ from auth_service.schemas.auth import (
     SwitchAccountRequest,
     TokenRequest,
     TokenResponse,
+    VerifyResetCodeRequest,
 )
 from auth_service.services.auth import AuthIdentity, AuthResult, AuthService
 from auth_service.services.email_verification import EmailVerificationService
@@ -93,6 +95,28 @@ async def superadmin(request: Request, authorization: str = Header()) -> AuthSer
     return authentication
 
 
+@router.get(
+    "/internal/users/{user_id}",
+    response_model=InternalUserResponse,
+    operation_id="auth_internal_get_user",
+)
+async def internal_get_user(
+    user_id: UUID, request: Request, authorization: str = Header()
+) -> InternalUserResponse:
+    """Trusted service-to-service lookup (email only) — guarded by a shared secret,
+    not a user JWT. Used by notification-service to resolve who to email for
+    events that only carry a user_id (no login/session context)."""
+    settings = request.app.state.settings
+    token = authorization.removeprefix("Bearer ").strip()
+    if not settings.internal_service_token or token != settings.internal_service_token:
+        raise AuthError(401, "INVALID_INTERNAL_TOKEN", "Internal service token is invalid")
+    authentication: AuthService = request.app.state.authentication
+    found = await authentication.get_user_by_id(user_id)
+    if found is None:
+        raise AuthError(404, "USER_NOT_FOUND", "User was not found")
+    return InternalUserResponse(id=found.id, email=found.email)
+
+
 def admin_user(value: object) -> AdminUserResponse:
     from auth_service.models import User
 
@@ -158,13 +182,26 @@ async def verify_email(payload: TokenRequest, request: Request) -> MessageSucces
 async def forgot_password(payload: ForgotPasswordRequest, request: Request) -> MessageSuccessResponse:
     password_reset: PasswordResetService = request.app.state.password_reset
     await password_reset.request(str(payload.email))
-    return message(request, "If the account exists, password reset instructions will be sent")
+    return message(request, "If the account exists, a reset code will be sent")
+
+
+@router.post(
+    "/forgot-password/verify",
+    response_model=MessageSuccessResponse,
+    operation_id="auth_verify_reset_code",
+)
+async def verify_reset_code(payload: VerifyResetCodeRequest, request: Request) -> MessageSuccessResponse:
+    password_reset: PasswordResetService = request.app.state.password_reset
+    ip = request.client.host if request.client is not None else "unknown"
+    await password_reset.verify(str(payload.email), payload.code, ip)
+    return message(request, "Reset code is valid")
 
 
 @router.post("/reset-password", response_model=MessageSuccessResponse, operation_id="auth_reset_password")
 async def reset_password(payload: ResetPasswordRequest, request: Request) -> MessageSuccessResponse:
     password_reset: PasswordResetService = request.app.state.password_reset
-    await password_reset.reset(payload.token, payload.password)
+    ip = request.client.host if request.client is not None else "unknown"
+    await password_reset.reset(str(payload.email), payload.code, payload.password, ip)
     return message(request, "Password reset successfully")
 
 

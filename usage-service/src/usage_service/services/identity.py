@@ -1,3 +1,4 @@
+import secrets
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, cast
@@ -7,6 +8,8 @@ import jwt
 
 from usage_service.core.config import Settings
 from usage_service.core.errors import UsageError
+
+INTERNAL_SERVICE_ID = UUID(int=0)
 
 
 @dataclass(frozen=True)
@@ -30,6 +33,10 @@ class JWTIdentityService:
         self.settings = settings
 
     def verify(self, token: str) -> Identity:
+        if self.settings.internal_service_token and secrets.compare_digest(
+            token, self.settings.internal_service_token
+        ):
+            return Identity(INTERNAL_SERVICE_ID, INTERNAL_SERVICE_ID, "Owner", "SuperAdmin")
         key = self.settings.jwt_public_key.replace("\\n", "\n")
         if not key and self.settings.jwt_public_key_path:
             try:

@@ -34,6 +34,8 @@ export const updateAccountMemberRole = (accountId: string, userId: string, role:
   });
 export const removeAccountMember = (accountId: string, userId: string) =>
   request<void>({ url: `/accounts/${accountId}/members/${userId}`, method: "DELETE" });
+export const acceptInvite = (token: string) =>
+  request<AccountMember>({ url: `/invites/${token}/accept`, method: "POST" });
 
 const selectedAccountKey = "creditflow_selected_account";
 export const selectedAccountStore = {

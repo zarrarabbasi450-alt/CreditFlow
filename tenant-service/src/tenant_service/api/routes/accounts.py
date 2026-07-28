@@ -1,16 +1,19 @@
 from typing import Annotated, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi import APIRouter, Depends, Header, Request, Response, status
 
 from tenant_service.api.dependencies import get_actor
+from tenant_service.core.errors import TenantError
 from tenant_service.schemas.accounts import (
     AccountCreate,
     AccountResponse,
+    AccountSummaryResponse,
     AccountUpdate,
     InviteCreate,
     InviteResponse,
     MemberResponse,
+    OwnerResponse,
     RoleUpdate,
 )
 from tenant_service.services.accounts import AccountService
@@ -22,6 +25,53 @@ Actor = Annotated[Identity, Depends(get_actor)]
 
 def service(request: Request) -> AccountService:
     return cast(AccountService, request.app.state.accounts)
+
+
+@router.get(
+    "/internal/{account_id}/owner",
+    response_model=OwnerResponse,
+    operation_id="get_account_owner_internal",
+)
+async def get_account_owner_internal(
+    account_id: UUID, request: Request, authorization: str = Header()
+) -> OwnerResponse:
+    """Trusted service-to-service lookup — guarded by a shared secret, not a user
+    JWT. Used by notification-service to resolve which user owns an account for
+    events that only carry an account_id (billing, usage threshold alerts)."""
+    settings = request.app.state.settings
+    token = authorization.removeprefix("Bearer ").strip()
+    if not settings.internal_service_token or token != settings.internal_service_token:
+        raise TenantError(401, "INVALID_INTERNAL_TOKEN", "Internal service token is invalid")
+    owner_user_id = await service(request).get_owner_user_id(account_id)
+    if owner_user_id is None:
+        raise TenantError(404, "ACCOUNT_OWNER_NOT_FOUND", "Account has no owner")
+    return OwnerResponse(user_id=owner_user_id)
+
+
+@router.get(
+    "/internal/{account_id}/summary",
+    response_model=AccountSummaryResponse,
+    operation_id="get_account_summary_internal",
+)
+async def get_account_summary_internal(
+    account_id: UUID, request: Request, authorization: str = Header()
+) -> AccountSummaryResponse:
+    """Trusted service-to-service lookup — guarded by a shared secret, not a user
+    JWT. Used by admin-service to build its per-account operational overview."""
+    settings = request.app.state.settings
+    token = authorization.removeprefix("Bearer ").strip()
+    if not settings.internal_service_token or token != settings.internal_service_token:
+        raise TenantError(401, "INVALID_INTERNAL_TOKEN", "Internal service token is invalid")
+    result = await service(request).get_summary(account_id)
+    if result is None:
+        raise TenantError(404, "ACCOUNT_NOT_FOUND", "Account was not found")
+    account, member_count = result
+    return AccountSummaryResponse(
+        account_id=account.id,
+        plan_tier=account.plan_tier,
+        seat_count=account.seat_count,
+        member_count=member_count,
+    )
 
 
 @router.post(

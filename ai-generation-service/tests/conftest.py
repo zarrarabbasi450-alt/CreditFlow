@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 from ai_generation_service.core.config import Settings
 from ai_generation_service.main import create_app
 from ai_generation_service.models import Base
+from ai_generation_service.services.credits import InMemoryCreditsClient
 from ai_generation_service.services.identity import Identity
 from ai_generation_service.services.openrouter import InMemoryAIProvider
 from ai_generation_service.services.rabbitmq import InMemoryEventBus
@@ -52,13 +53,23 @@ async def context() -> AsyncIterator[dict[str, Any]]:
     redis = InMemoryRedisService()
     events = InMemoryEventBus()
     usage = InMemoryUsageClient()
+    credits = InMemoryCreditsClient()
     ai = InMemoryAIProvider(["Hello", " from", " CreditFlow"])
     settings = Settings(_env_file=None)
-    app = create_app(DatabaseStub(sessions), redis, events, usage, ai, identity=IdentityStub())
+    app = create_app(
+        DatabaseStub(sessions), redis, events, usage, credits, ai, identity=IdentityStub()
+    )
     app.state.settings = settings
     app.state.generations.settings = settings
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
-        yield {"client": client, "app": app, "redis": redis, "events": events, "usage": usage}
+        yield {
+            "client": client,
+            "app": app,
+            "redis": redis,
+            "events": events,
+            "usage": usage,
+            "credits": credits,
+        }
     await engine.dispose()
 
 

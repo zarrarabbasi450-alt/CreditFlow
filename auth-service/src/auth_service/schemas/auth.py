@@ -51,8 +51,14 @@ class ForgotPasswordRequest(BaseModel):
     email: EmailStr
 
 
+class VerifyResetCodeRequest(BaseModel):
+    email: EmailStr
+    code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+
+
 class ResetPasswordRequest(StrongPasswordRequest):
-    token: str = Field(min_length=1)
+    email: EmailStr
+    code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
 
 
 class AuthUserResponse(BaseModel):
@@ -70,6 +76,11 @@ class AdminUserResponse(BaseModel):
     isActive: bool
     isEmailVerified: bool
     platformRole: str | None = None
+
+
+class InternalUserResponse(BaseModel):
+    id: UUID
+    email: EmailStr
 
 
 class PlatformRoleUpdate(BaseModel):

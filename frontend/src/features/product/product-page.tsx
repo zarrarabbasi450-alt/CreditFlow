@@ -1,15 +1,24 @@
 "use client";
 import { motion } from "framer-motion";
-import { useQueryClient } from "@tanstack/react-query";
-import { ArrowUpRight, CheckCircle2, Clock, Image as ImageIcon, Plus, Sparkles, Square } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  ArrowUpRight,
+  CheckCircle2,
+  Clock,
+  Image as ImageIcon,
+  Plus,
+  Sparkles,
+  Square,
+  Trash2,
+} from "lucide-react";
 import Image from "next/image";
-import { useState } from "react";
+import Link from "next/link";
+import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { RecurringScheduleForm } from "@/features/scheduler/recurring-form";
-import { LinkedInImageForm } from "@/features/publishing/linkedin-image-form";
-import { cancelGeneration, generateImage, streamGeneration } from "@/lib/api/content";
+import { cancelGeneration, deletePromptHistory, generateImage, streamGeneration } from "@/lib/api/content";
 import { useToast } from "@/components/toast";
+import { consumeScraperPromptSeed } from "@/lib/scraper-handoff";
 import { useProductView } from "@/hooks/useProductView";
 import { usePromptHistory } from "@/hooks/useAI";
 import { TeamManagement } from "@/features/team/team-management";
@@ -19,6 +28,9 @@ import { AdminOperations } from "@/features/admin/operations";
 import { AccountSettings } from "@/features/settings/account-settings";
 import { UsageManagement } from "@/features/usage/usage-management";
 import { ContentManagement } from "@/features/content/content-management";
+import { PublishingManagement } from "@/features/publishing/publishing-management";
+import { SchedulerManagement } from "@/features/scheduler/scheduler-management";
+import { ScraperManagement } from "@/features/scraper/scraper-management";
 import type { ActivityRow } from "@/types";
 function SectionTabs({ section, subsection }: { section: string; subsection?: string }) {
   const tabs: Record<string, string[]> = {
@@ -31,7 +43,7 @@ function SectionTabs({ section, subsection }: { section: string; subsection?: st
     settings: ["Account", "Sessions", "API keys"],
     team: ["Members", "Invitations"],
     usage: ["Overview", "Ledger", "Models"],
-    admin: ["Overview", "Accounts", "Users", "Health", "Audit", "Failed jobs", "Feature flags"],
+    admin: ["Overview", "Accounts", "Users", "Sessions", "Health", "Audit", "Failed jobs", "Feature flags"],
   };
   return tabs[section] ? (
     <div className="tabs">
@@ -63,24 +75,36 @@ export function ProductPage({ section, subsection }: { section: string; subsecti
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [output, setOutput] = useState("");
   const [generating, setGenerating] = useState(false);
-  const special =
-    subsection === "recurring"
-      ? "recurring"
-      : subsection === "linkedin-image"
-        ? "image"
-        : section === "ai-studio"
-          ? "ai"
-          : null;
+  const [savedAsDraft, setSavedAsDraft] = useState(false);
+  const deleteHistoryEntry = useMutation({
+    mutationFn: deletePromptHistory,
+    onSuccess: () => {
+      void history.refetch();
+      notify("Prompt history entry deleted");
+    },
+    onError: (deleteError) =>
+      notify(deleteError instanceof Error ? deleteError.message : "Unable to delete this entry"),
+  });
+  const special = section === "ai-studio" ? "ai" : null;
+  useEffect(() => {
+    if (section !== "ai-studio") return;
+    const seed = consumeScraperPromptSeed();
+    if (seed) setPrompt(seed);
+  }, [section]);
   async function generate() {
     if (!prompt.trim()) return;
     setGenerating(true);
     setOutput("");
     setImageUrl(null);
+    setSavedAsDraft(false);
     try {
       for await (const chunk of streamGeneration({ prompt, model, generateImage: includeImage })) {
         setCurrentJobId(chunk.generationId);
         if (chunk.type === "token") setOutput((value) => value + chunk.value);
-        if (chunk.type === "complete" && chunk.imageUrl) setImageUrl(chunk.imageUrl);
+        if (chunk.type === "complete") {
+          setSavedAsDraft(true);
+          if (chunk.imageUrl) setImageUrl(chunk.imageUrl);
+        }
         if (chunk.type === "failed") throw new Error(chunk.value);
         if (chunk.type === "cancelled") {
           setOutput((value) => value + `\n${chunk.value}`);
@@ -120,6 +144,10 @@ export function ProductPage({ section, subsection }: { section: string; subsecti
       </div>
     );
   const runPrimaryAction = () => {
+    if (section === "dashboard") {
+      window.location.assign("/ai-studio");
+      return;
+    }
     if (section === "team") {
       document.getElementById("team-invite-email")?.focus();
       return;
@@ -139,7 +167,19 @@ export function ProductPage({ section, subsection }: { section: string; subsecti
       return;
     }
     if (section === "content") {
-      document.getElementById("content-title")?.focus();
+      window.dispatchEvent(new Event("content:new-draft"));
+      return;
+    }
+    if (section === "scheduler") {
+      document.getElementById("scheduler-content")?.focus();
+      return;
+    }
+    if (section === "publishing") {
+      window.location.assign("/publishing/linkedin");
+      return;
+    }
+    if (section === "scraper") {
+      document.getElementById("scraper-job-name")?.focus();
       return;
     }
     notify(`${base.action} action opened`);
@@ -156,7 +196,7 @@ export function ProductPage({ section, subsection }: { section: string; subsecti
           <h1>{title}</h1>
           <p>{base.description}</p>
         </div>
-        {section !== "settings" && section !== "billing" && (
+        {section !== "settings" && section !== "billing" && special !== "ai" && (
           <button className="primary-button" onClick={runPrimaryAction}>
             <Plus />
             {base.action}
@@ -177,16 +217,6 @@ export function ProductPage({ section, subsection }: { section: string; subsecti
           ))}
         </div>
       )}
-      {special === "recurring" && (
-        <Panel title="Create a recurring schedule">
-          <RecurringScheduleForm />
-        </Panel>
-      )}
-      {special === "image" && (
-        <Panel title="Publish an image post">
-          <LinkedInImageForm />
-        </Panel>
-      )}
       {special === "ai" && subsection === "chat-history" && (
         <Panel title="Chat history">
           <div className="data-rows history-rows">
@@ -205,6 +235,14 @@ export function ProductPage({ section, subsection }: { section: string; subsecti
                   </div>
                 </div>
                 <em>{new Date(item.createdAt).toLocaleString()}</em>
+                <button
+                  className="icon-button"
+                  aria-label="Delete this prompt history entry"
+                  disabled={deleteHistoryEntry.isPending}
+                  onClick={() => deleteHistoryEntry.mutate(item.id)}
+                >
+                  <Trash2 />
+                </button>
               </div>
             ))}
           </div>
@@ -278,21 +316,36 @@ export function ProductPage({ section, subsection }: { section: string; subsecti
                   </a>
                 </div>
               )}
+              {savedAsDraft && (
+                <p className="output-saved-note">
+                  <CheckCircle2 />
+                  Saved as a draft in your Content Library.{" "}
+                  <Link href="/content/drafts">Open drafts</Link>
+                </p>
+              )}
             </div>
           </Panel>
           <Panel title="Prompt history">
             <div className="data-rows">
-              {history.isLoading && <p>Loading prompt historyâ€¦</p>}
+              {history.isLoading && <p>Loading prompt history…</p>}
               {!history.isLoading && (history.data ?? []).length === 0 && <p>No prompt history yet.</p>}
               {(history.data ?? []).slice(0, 5).map((item) => (
                 <div key={item.id}>
                   <div>
                     <strong>{item.prompt}</strong>
                     <small>
-                      {item.model} Â· {item.totalTokens.toLocaleString()} tokens
+                      {item.model} · {item.totalTokens.toLocaleString()} tokens
                     </small>
                   </div>
                   <em>{new Date(item.createdAt).toLocaleDateString()}</em>
+                  <button
+                    className="icon-button"
+                    aria-label="Delete this prompt history entry"
+                    disabled={deleteHistoryEntry.isPending}
+                    onClick={() => deleteHistoryEntry.mutate(item.id)}
+                  >
+                    <Trash2 />
+                  </button>
                 </div>
               ))}
             </div>
@@ -342,10 +395,27 @@ export function ProductPage({ section, subsection }: { section: string; subsecti
           <ContentManagement subsection={subsection} />
         </Panel>
       )}
+      {section === "scheduler" && (
+        <Panel title={subsection === "recurring" ? "Scheduler automation" : "Publishing calendar"}>
+          <SchedulerManagement subsection={subsection} />
+        </Panel>
+      )}
+      {section === "publishing" && (
+        <Panel title={subsection === "history" ? "Publishing history" : "LinkedIn publishing"}>
+          <PublishingManagement subsection={subsection} />
+        </Panel>
+      )}
+      {section === "scraper" && (
+        <Panel title="Research scraper">
+          <ScraperManagement />
+        </Panel>
+      )}
       {!special &&
-        section !== "dashboard" &&
         section !== "usage" &&
         section !== "content" &&
+        section !== "scheduler" &&
+        section !== "publishing" &&
+        section !== "scraper" &&
         section !== "team" &&
         section !== "billing" &&
         section !== "credits" &&
@@ -355,9 +425,9 @@ export function ProductPage({ section, subsection }: { section: string; subsecti
             <DataRows rows={base.rows ?? []} />
           </Panel>
         )}
-      {(section === "dashboard" || (section === "usage" && !subsection)) && (
+      {section === "usage" && !subsection && (
         <div className="dashboard-grid">
-          <Panel title={section === "usage" ? "Daily token volume" : "Content momentum"}>
+          <Panel title="Daily token volume">
             <div className="chart">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={base.chart ?? []}>
@@ -371,13 +441,7 @@ export function ProductPage({ section, subsection }: { section: string; subsecti
                   <XAxis dataKey="day" />
                   <YAxis hide />
                   <Tooltip />
-                  <Area
-                    type="monotone"
-                    dataKey={section === "usage" ? "tokens" : "posts"}
-                    stroke="#7c5cff"
-                    strokeWidth={3}
-                    fill="url(#fill)"
-                  />
+                  <Area type="monotone" dataKey="tokens" stroke="#7c5cff" strokeWidth={3} fill="url(#fill)" />
                 </AreaChart>
               </ResponsiveContainer>
             </div>

@@ -43,6 +43,17 @@ class MemberResponse(BaseModel):
     updated_at: datetime
 
 
+class OwnerResponse(BaseModel):
+    user_id: UUID
+
+
+class AccountSummaryResponse(BaseModel):
+    account_id: UUID
+    plan_tier: str
+    seat_count: int
+    member_count: int
+
+
 class RoleUpdate(BaseModel):
     role: MemberRole
 

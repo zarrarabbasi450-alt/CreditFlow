@@ -75,8 +75,12 @@ export function BillingManagement({ subsection }: { subsection?: string }) {
       action === "portal" ? openBillingPortal() : createCheckout(action),
     onSuccess: ({ url }) => window.location.assign(url),
   });
-  const free = useMutation({
-    mutationFn: () => changePlan("free"),
+  // Once a Stripe subscription already exists, any plan change — including
+  // downgrading to Free — must modify that same subscription. Routing it through
+  // Checkout again would start a second, unrelated subscription that keeps
+  // billing in the background even after "downgrading" the original.
+  const switchPlan = useMutation({
+    mutationFn: (plan: BillingPlan) => changePlan(plan),
     onSuccess: () => client.invalidateQueries({ queryKey: ["billing"] }),
   });
   const refund = useMutation({
@@ -87,6 +91,7 @@ export function BillingManagement({ subsection }: { subsection?: string }) {
   if (billing.error) return <p className="team-error">{billing.error.message}</p>;
   const value = billing.data!;
   const currentPlan = value.subscription.plan.toLowerCase();
+  const hasActiveSubscription = currentPlan !== "free" && value.subscription.status !== "Canceled";
   const canViewInvoices = user?.role === "Owner" || user?.role === "SuperAdmin";
   const showSubscription = !subsection || subsection === "subscription";
   const showInvoices = !subsection || subsection === "invoices";
@@ -170,8 +175,12 @@ export function BillingManagement({ subsection }: { subsection?: string }) {
                     ))}
                   </ul>
                   <button
-                    disabled={current || redirect.isPending || free.isPending}
-                    onClick={() => (plan.id === "free" ? free.mutate() : redirect.mutate(plan.id))}
+                    disabled={current || redirect.isPending || switchPlan.isPending}
+                    onClick={() =>
+                      plan.id === "free" || hasActiveSubscription
+                        ? switchPlan.mutate(plan.id)
+                        : redirect.mutate(plan.id)
+                    }
                   >
                     {current
                       ? "Your current plan"
@@ -185,8 +194,8 @@ export function BillingManagement({ subsection }: { subsection?: string }) {
           </div>
         </>
       )}
-      {(redirect.error || free.error) && (
-        <p className="team-error billing-error">{(redirect.error ?? free.error)?.message}</p>
+      {(redirect.error || switchPlan.error) && (
+        <p className="team-error billing-error">{(redirect.error ?? switchPlan.error)?.message}</p>
       )}
 
       {canViewInvoices && showInvoices && (
@@ -242,10 +251,15 @@ export function BillingManagement({ subsection }: { subsection?: string }) {
               <h3>Payment methods</h3>
               <p>Add, replace, or remove payment methods securely in Stripe.</p>
             </div>
-            <button onClick={() => redirect.mutate("portal")}>
-              Open secure portal <ExternalLink />
+            <button disabled={redirect.isPending} onClick={() => redirect.mutate("portal")}>
+              {redirect.isPending ? "Opening…" : "Open secure portal"} <ExternalLink />
             </button>
           </div>
+          {redirect.error && (
+            <p className="team-error billing-error">
+              {redirect.error.message || "Unable to open the Stripe portal. Please try again."}
+            </p>
+          )}
         </section>
       )}
       {refund.error && <p className="team-error billing-error">{refund.error.message}</p>}

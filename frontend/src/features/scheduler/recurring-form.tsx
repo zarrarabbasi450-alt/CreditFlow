@@ -4,11 +4,9 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { recurringScheduleSchema } from "@/lib/schemas";
 import { useToast } from "@/components/toast";
-import { useCreateSchedule } from "@/hooks/useScheduler";
 type Values = z.infer<typeof recurringScheduleSchema>;
 export function RecurringScheduleForm() {
   const { notify } = useToast();
-  const createSchedule = useCreateSchedule();
   const {
     register,
     handleSubmit,
@@ -21,9 +19,9 @@ export function RecurringScheduleForm() {
   return (
     <form
       className="workflow-form"
-      onSubmit={handleSubmit(async (values) => {
-        await createSchedule.mutateAsync(values);
-        notify("Recurring schedule created");
+      onSubmit={handleSubmit((values) => {
+        void values;
+        notify("Recurring scheduling is prepared for a future workflow service");
         reset();
       })}
     >

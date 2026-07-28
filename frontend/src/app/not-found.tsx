@@ -7,8 +7,8 @@ export default function NotFound() {
       <span>404</span>
       <h1>This page drifted off course.</h1>
       <p>The destination may have moved, or your role may not have access to it.</p>
-      <Link className="primary-button" href="/dashboard">
-        Return to dashboard
+      <Link className="primary-button" href="/content">
+        Return to workspace
       </Link>
     </main>
   );

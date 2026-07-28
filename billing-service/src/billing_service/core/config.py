@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     stripe_checkout_success_url: str = "http://localhost:3000/billing?checkout=success"
     stripe_checkout_cancel_url: str = "http://localhost:3000/billing?checkout=cancelled"
     stripe_portal_return_url: str = "http://localhost:3000/billing"
+    stripe_credit_checkout_success_url: str = "http://localhost:3000/credits?checkout=success"
+    stripe_credit_checkout_cancel_url: str = "http://localhost:3000/credits?checkout=cancelled"
+    # Priced server-side (never trusted from the client) so a tampered request body
+    # can't buy credits below cost.
+    credit_price_cents: int = 1
     dunning_grace_days: int = 7
     outbox_poll_seconds: float = 1.0
     trusted_hosts: Annotated[list[str], NoDecode] = ["localhost", "127.0.0.1", "testserver"]

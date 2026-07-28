@@ -72,3 +72,16 @@ class ContentVersion(Base):
     image_asset_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
     edited_by: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class ProcessedEvent(Base):
+    """Idempotency ledger for RabbitMQ-consumed events — a redelivered message with
+    an event_id already recorded here is a no-op, never reprocessed."""
+
+    __tablename__ = "processed_events"
+    __table_args__ = (UniqueConstraint("event_id", name="uq_content_processed_event_id"),)
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    event_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)

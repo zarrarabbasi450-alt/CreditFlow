@@ -7,10 +7,23 @@ from fastapi import FastAPI
 from httpx import AsyncClient
 
 from conftest import ACCOUNT_ID, OTHER_ACCOUNT_ID, USER_ID
+from usage_service.core.config import Settings
 from usage_service.core.errors import UsageError
+from usage_service.services.identity import INTERNAL_SERVICE_ID, JWTIdentityService
 from usage_service.services.rabbitmq import InMemoryEventBus
 from usage_service.services.redis import InMemoryRedisService
 from usage_service.services.usage import UsageService, monthly_period
+
+
+def test_internal_service_token_grants_superadmin_identity() -> None:
+    settings = Settings(_env_file=None, internal_service_token="shared-secret")  # noqa: S106
+    identity = JWTIdentityService(settings).verify("shared-secret")
+    assert identity.is_superadmin
+    assert identity.user_id == INTERNAL_SERVICE_ID
+
+    with pytest.raises(UsageError) as invalid:
+        JWTIdentityService(settings).verify("wrong-token")
+    assert invalid.value.code == "INVALID_TOKEN"
 
 
 def generation_event(tokens: int, *, model: str = "openai/gpt-4.1") -> dict[str, Any]:

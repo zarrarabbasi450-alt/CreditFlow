@@ -1,14 +1,14 @@
 import Link from "next/link";
 import { AuthLayout } from "@/components/auth-layout";
-import { SimpleAuthForm } from "@/components/simple-auth-form";
+import { ForgotPasswordFlow } from "@/features/auth/forgot-password-flow";
 export default function Page() {
   return (
     <AuthLayout
       title="Reset your password"
-      description="We will send a secure link to the email connected to your workspace."
+      description="We'll email you a one-time code to confirm it's really you."
       footer={<Link href="/login">Return to sign in</Link>}
     >
-      <SimpleAuthForm kind="forgot" />
+      <ForgotPasswordFlow />
     </AuthLayout>
   );
 }

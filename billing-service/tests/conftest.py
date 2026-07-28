@@ -31,6 +31,11 @@ class StripeStub:
     def create_checkout(self, customer: str, price: str, seats: int, account_id: str) -> str:
         return "https://checkout.stripe.test/session"
 
+    def create_credit_checkout(
+        self, customer: str, credits: int, unit_amount_cents: int, account_id: str
+    ) -> str:
+        return f"https://checkout.stripe.test/credits?credits={credits}&amount={unit_amount_cents}"
+
     def create_portal(self, customer: str) -> str:
         return "https://billing.stripe.test/portal"
 

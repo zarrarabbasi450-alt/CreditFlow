@@ -111,6 +111,20 @@ async def test_registered_event_creates_individual_account_once(accounts: Accoun
 
 
 @pytest.mark.asyncio
+async def test_individual_account_rejects_invites(accounts: AccountService) -> None:
+    user_id = uuid4()
+    await accounts.handle_user_registered({"user_id": str(user_id), "email": "solo@example.com"})
+    owner = actor(user_id, user_id, MemberRole.OWNER)
+
+    payload = InviteCreate(email="friend@example.com", role=MemberRole.MEMBER)
+    with pytest.raises(TenantError) as rejected:
+        await accounts.invite(user_id, payload, owner)
+    assert rejected.value.code == "INDIVIDUAL_ACCOUNT_SINGLE_MEMBER"
+    members = await accounts.list_members(user_id, owner)
+    assert len(members) == 1
+
+
+@pytest.mark.asyncio
 async def test_account_update_and_invoice_paid_event(accounts: AccountService) -> None:
     owner_id = uuid4()
     account = await accounts.create(AccountCreate(name="Before", slug="updates", type="team"), owner_id)
@@ -119,9 +133,12 @@ async def test_account_update_and_invoice_paid_event(accounts: AccountService) -
     updated = await accounts.update(account.id, AccountUpdate(name="After"), owner)
     assert updated.name == "After"
 
-    await accounts.handle_event(
-        "invoice.paid", {"account_id": str(account.id), "plan": "pro", "invoice_id": str(uuid4())}
-    )
+    invoice_event_id = str(uuid4())
+    invoice_paid_payload = {"account_id": str(account.id), "plan": "pro", "invoice_id": str(uuid4())}
+    await accounts.handle_event(invoice_event_id, "invoice.paid", invoice_paid_payload)
+    # Redelivery of the same event_id must be a no-op (idempotent consumption),
+    # not a second application of the invoice.paid side effect.
+    await accounts.handle_event(invoice_event_id, "invoice.paid", invoice_paid_payload)
     refreshed = await accounts.get(account.id, owner)
     assert refreshed.plan_tier == "pro"
     publisher = cast(InMemoryEventBus, accounts.publisher)
@@ -180,6 +197,25 @@ async def test_admin_member_limits_and_superadmin_override(accounts: AccountServ
     assert (await accounts.get(account.id, superadmin)).id == account.id
     assert account.id in {value.id for value in await accounts.list_for_user(superadmin, all_accounts=True)}
     await accounts.update_role(account.id, admin_id, MemberRole.MEMBER, superadmin)
+
+
+@pytest.mark.asyncio
+async def test_get_owner_user_id_and_summary(accounts: AccountService) -> None:
+    owner_id, member_id = uuid4(), uuid4()
+    account = await accounts.create(AccountCreate(name="Summary", slug="summary", type="team"), owner_id)
+    async with accounts.sessions() as session, session.begin():
+        session.add(AccountMember(account_id=account.id, user_id=member_id, role=MemberRole.MEMBER))
+
+    assert await accounts.get_owner_user_id(account.id) == owner_id
+    assert await accounts.get_owner_user_id(uuid4()) is None
+
+    result = await accounts.get_summary(account.id)
+    assert result is not None
+    summarized_account, member_count = result
+    assert summarized_account.id == account.id
+    assert member_count == 2
+
+    assert await accounts.get_summary(uuid4()) is None
 
 
 @pytest.mark.asyncio

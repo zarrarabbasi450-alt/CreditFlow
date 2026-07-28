@@ -269,6 +269,20 @@ class CreditsService:
                         )
                     )
                     changed = account_id, amount, "credited"
+            elif event_type == "credits.purchased":
+                amount = int(payload.get("credits", 0))
+                if amount > 0:
+                    session.add(
+                        CreditLedger(
+                            account_id=account_id,
+                            entry_type=LedgerType.GRANT,
+                            amount=amount,
+                            description="Credit pack purchase",
+                            reference_type="credit_purchase",
+                            reference_id=str(payload.get("payment_intent_id") or payload["account_id"]),
+                        )
+                    )
+                    changed = account_id, amount, "credited"
             elif event_type == "refund.issued":
                 grant = await session.scalar(
                     select(CreditLedger).where(

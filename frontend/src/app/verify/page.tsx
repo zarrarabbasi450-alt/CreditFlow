@@ -1,6 +1,8 @@
+"use client";
 import Link from "next/link";
+import { Suspense } from "react";
 import { AuthLayout } from "@/components/auth-layout";
-import { SimpleAuthForm } from "@/components/simple-auth-form";
+import { VerifyEmail } from "@/features/auth/verify-email";
 export default function Page() {
   return (
     <AuthLayout
@@ -8,7 +10,9 @@ export default function Page() {
       description="One quick confirmation keeps your workspace and notifications secure."
       footer={<Link href="/login">Return to sign in</Link>}
     >
-      <SimpleAuthForm kind="verify" />
+      <Suspense fallback={<div className="form-skeleton" />}>
+        <VerifyEmail />
+      </Suspense>
     </AuthLayout>
   );
 }

@@ -50,6 +50,9 @@ jobs:
           - credits-service
           - usage-service
           - ai-generation-service
+          - scraper-service
+          - notification-service
+          - admin-service
     defaults:
       run:
         working-directory: ${{ matrix.service }}

@@ -35,6 +35,7 @@ class RabbitMQService:
         shared_exchange = await channel.declare_exchange(
             "creditflow.events", ExchangeType.TOPIC, durable=True
         )
+        dlx = await channel.declare_exchange("ai_events.dlx", ExchangeType.TOPIC, durable=True)
         queue = await channel.declare_queue(
             "usage-service.ai-generation-events",
             durable=True,
@@ -44,8 +45,12 @@ class RabbitMQService:
                 "x-dead-letter-exchange": "ai_events.dlx",
             },
         )
+        dead_letter_queue = await channel.declare_queue(
+            "usage-service.ai-generation-events.dead-letter", durable=True
+        )
         await queue.bind(ai_exchange, "ai.generation_completed")
         await queue.bind(shared_exchange, "ai.generation_completed")
+        await dead_letter_queue.bind(dlx, "#")
 
         async def consume(message: AbstractIncomingMessage) -> None:
             async with message.process(requeue=True):

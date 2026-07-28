@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     database_schema: str = "credits"
     rabbitmq_url: str = "amqp://guest:guest@localhost:5672/"
     billing_service_url: str = "http://localhost:8003"
+    internal_service_token: str = ""
     jwt_public_key: str = ""
     jwt_public_key_path: str = ""
     jwt_issuer: str = "creditflow-auth"

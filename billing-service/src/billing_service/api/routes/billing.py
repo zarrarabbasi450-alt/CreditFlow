@@ -6,6 +6,7 @@ from billing_service.api.dependencies import require_owner
 from billing_service.schemas.billing import (
     BillingOverviewResponse,
     CheckoutRequest,
+    CreditCheckoutRequest,
     EscrowCreateRequest,
     EscrowResponse,
     InvoiceResponse,
@@ -51,6 +52,11 @@ async def get_subscription(request: Request, owner: Owner) -> SubscriptionRespon
 @router.post("/checkout", response_model=UrlResponse)
 async def checkout(payload: CheckoutRequest, request: Request, owner: Owner) -> UrlResponse:
     return UrlResponse(url=await service(request).checkout(owner.account_id, payload))
+
+
+@router.post("/credits/checkout", response_model=UrlResponse)
+async def credit_checkout(payload: CreditCheckoutRequest, request: Request, owner: Owner) -> UrlResponse:
+    return UrlResponse(url=await service(request).credit_checkout(owner.account_id, payload))
 
 
 @router.post("/portal", response_model=UrlResponse)

@@ -125,3 +125,58 @@ async def test_ai_generation_completed_consumer(context: dict[str, Any]) -> None
     assert len(rows) == 1
     assert rows[0].title == "Announce analytics"
     assert len(events.events) == 1
+
+
+async def test_delete_publishes_content_deleted(
+    context: dict[str, Any], auth: dict[str, str]
+) -> None:
+    client = cast(AsyncClient, context["client"])
+    events = cast(InMemoryEventBus, context["events"])
+    item = await create_item(client, auth)
+    assert (await client.delete(f"/api/v1/content/{item['id']}", headers=auth)).status_code == 200
+    deleted_events = [event for event in events.events if event.event_type == "content.deleted"]
+    assert len(deleted_events) == 1
+    assert deleted_events[0].payload["content_id"] == item["id"]
+    assert (await client.get(f"/api/v1/content/{item['id']}", headers=auth)).status_code == 404
+
+
+async def test_generation_deleted_removes_content_and_cascades(
+    context: dict[str, Any],
+) -> None:
+    sessions = cast(async_sessionmaker[AsyncSession], context["sessions"])
+    events = cast(InMemoryEventBus, context["events"])
+    generation_id = uuid4()
+    completed = {
+        "event_id": str(uuid4()),
+        "event_type": "ai.generation_completed",
+        "correlation_id": str(uuid4()),
+        "occurred_at": datetime.now(UTC).isoformat(),
+        "payload": {
+            "generation_id": str(generation_id),
+            "generation_type": "post",
+            "account_id": str(ACCOUNT_ID),
+            "user_id": str(USER_ID),
+            "prompt": "Announce analytics",
+            "response": "Here is the generated post.",
+            "model": "openai/gpt-4.1-mini",
+            "prompt_tokens": 10,
+            "completion_tokens": 10,
+            "total_tokens": 20,
+            "cost_microusd": 100,
+        },
+    }
+    await events.deliver(completed)
+    async with sessions() as session:
+        assert len(list((await session.scalars(select(Content))).all())) == 1
+
+    deleted = {
+        "event_id": str(uuid4()),
+        "event_type": "ai.generation_deleted",
+        "correlation_id": str(uuid4()),
+        "occurred_at": datetime.now(UTC).isoformat(),
+        "payload": {"generation_id": str(generation_id), "account_id": str(ACCOUNT_ID)},
+    }
+    await events.deliver(deleted)
+    async with sessions() as session:
+        assert list((await session.scalars(select(Content))).all()) == []
+    assert [event.event_type for event in events.events] == ["content.created", "content.deleted"]

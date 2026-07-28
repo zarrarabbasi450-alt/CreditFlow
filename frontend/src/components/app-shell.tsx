@@ -1,22 +1,32 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Bell, LogOut, Menu, Sparkles, X } from "lucide-react";
+import { LogOut, Menu, Sparkles, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
+import { navigation } from "@/lib/navigation";
 import { RoleNavigation } from "./role-navigation";
 import { ThemeToggle } from "./theme-toggle";
 import { CommandPalette } from "./command-palette";
+import { NotificationBell } from "./notification-bell";
 import { WorkspaceSwitcher } from "./workspace-switcher";
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, ready, logout } = useAuth();
   const router = useRouter();
   const path = usePathname();
   const [mobile, setMobile] = useState(false);
+  const section = path.split("/").filter(Boolean)[0];
+  const navItem = navigation.find((entry) => entry.href === `/${section}`);
+  const forbidden = !!user && !!navItem?.roles && !navItem.roles.includes(user.role);
   useEffect(() => {
     if (ready && !user) router.replace(`/login?next=${encodeURIComponent(path)}`);
   }, [ready, user, router, path]);
-  if (!ready || !user)
+  useEffect(() => {
+    // Nav-link hiding alone isn't a guard — a Member can still type /admin into the
+    // address bar. This redirects away from any section the signed-in role can't see.
+    if (forbidden) router.replace("/content");
+  }, [forbidden, router]);
+  if (!ready || !user || forbidden)
     return (
       <div className="loading-screen">
         <Sparkles className="animate-pulse" />
@@ -73,7 +83,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Menu />
           </button>
           <div className="breadcrumbs">
-            <Link href="/dashboard">Workspace</Link>
+            <Link href="/content">Workspace</Link>
             {crumbs.map((crumb) => (
               <span key={crumb}>
                 / <strong>{crumb.replaceAll("-", " ")}</strong>
@@ -82,10 +92,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
           <CommandPalette />
           <ThemeToggle />
-          <Link className="icon-button" aria-label="Notifications" href="/notifications">
-            <Bell />
-            <i />
-          </Link>
+          <NotificationBell />
           <span className="role-badge" title="Your verified access role">
             {user.role}
           </span>

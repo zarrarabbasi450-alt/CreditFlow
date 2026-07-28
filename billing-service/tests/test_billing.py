@@ -23,6 +23,11 @@ async def test_owner_billing_flow(client: AsyncClient, auth: dict[str, str]) -> 
     assert checkout.json()["url"].startswith("https://checkout.stripe.test")
     portal = await client.post("/api/v1/billing/portal", headers=auth)
     assert portal.json()["url"].startswith("https://billing.stripe.test")
+    credit_checkout = await client.post(
+        "/api/v1/billing/credits/checkout", headers=auth, json={"credits": 500}
+    )
+    assert credit_checkout.status_code == 200
+    assert "credits=500" in credit_checkout.json()["url"]
 
 
 async def test_requires_bearer(client: AsyncClient) -> None:

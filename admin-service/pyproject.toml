@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "creditflow-admin-service"
+version = "0.1.0"
+requires-python = ">=3.14"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S"]
+ignore = ["S101"]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+plugins = ["sqlalchemy.ext.mypy.plugin"]
+mypy_path = "src"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "--basetemp=.pytest-tmp --cov=src/admin_service --cov-report=term-missing --cov-fail-under=80"
+
+[tool.coverage.run]
+omit = [
+  "src/admin_service/database.py",
+  "src/admin_service/core/logging.py",
+  "src/admin_service/services/identity.py",
+  "src/admin_service/services/rabbitmq.py",
+  "src/admin_service/services/redis.py",
+  "src/admin_service/services/directory.py",
+  "src/admin_service/services/health.py",
+]

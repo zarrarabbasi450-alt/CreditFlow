@@ -30,6 +30,7 @@ const toUser = (value: BackendAuthUser): AuthUser => ({
   id: value.id,
   name: value.email.split("@", 1)[0],
   email: value.email,
+  accountId: value.accountId,
   role: value.role,
   accountRole: value.accountRole,
   platformRole: value.platformRole,
@@ -42,17 +43,11 @@ export const login = async (data: LoginRequest): Promise<AuthSession> => {
   const session = await request<BackendAuthSession>({ url: "/auth/login", method: "POST", data });
   return { user: toUser(session.user), tokens: session.tokens };
 };
-export const logout = (refreshToken: string) =>
-  request<void>({ url: "/auth/logout", method: "POST", data: { refreshToken } });
-export const refreshSession = async (refreshToken: string): Promise<AuthSession> => {
-  const session = await request<BackendAuthSession>({
-    url: "/auth/refresh",
-    method: "POST",
-    data: { refreshToken },
-  });
+export const logout = () => request<void>({ url: "/auth/logout", method: "POST", data: {} });
+export const refreshSession = async (): Promise<AuthSession> => {
+  const session = await request<BackendAuthSession>({ url: "/auth/refresh", method: "POST", data: {} });
   return { user: toUser(session.user), tokens: session.tokens };
 };
-export const refreshToken = async (refreshToken: string) => (await refreshSession(refreshToken)).tokens;
 export const switchAccount = async (accountId: string): Promise<AuthSession> => {
   const session = await request<BackendAuthSession>({
     url: "/auth/switch-account",
@@ -63,3 +58,19 @@ export const switchAccount = async (accountId: string): Promise<AuthSession> => 
 };
 export const getCurrentUser = async (): Promise<AuthUser> =>
   toUser(await request<BackendAuthUser>({ url: "/auth/me", method: "GET" }));
+export const verifyEmail = (token: string) =>
+  request<{ message: string }>({ url: "/auth/verify-email", method: "POST", data: { token } });
+export const requestPasswordReset = (email: string) =>
+  request<{ message: string }>({ url: "/auth/forgot-password", method: "POST", data: { email } });
+export const verifyResetCode = (email: string, code: string) =>
+  request<{ message: string }>({
+    url: "/auth/forgot-password/verify",
+    method: "POST",
+    data: { email, code },
+  });
+export const resetPassword = (email: string, code: string, password: string) =>
+  request<{ message: string }>({
+    url: "/auth/reset-password",
+    method: "POST",
+    data: { email, code, password },
+  });

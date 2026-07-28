@@ -50,6 +50,37 @@ def test_gateway_role_enforcement_and_superadmin_bypass() -> None:
     enforce_route_role("GET", "/api/v1/admin/users", superadmin)
 
 
+def test_gateway_rejects_member_from_team_management_and_credit_checkout() -> None:
+    base = {
+        "sub": "user-1",
+        "user_id": "user-1",
+        "jti": "session-1",
+        "account_id": "account-1",
+        "account_role": "Member",
+        "role": "Member",
+        "token_type": "access",
+        "iss": "creditflow-auth",
+        "aud": "creditflow-api",
+        "exp": 2_000_000_000,
+    }
+    member = TokenClaims.model_validate(base)
+    admin = TokenClaims.model_validate({**base, "account_role": "Admin", "role": "Admin"})
+
+    for method, path in [
+        ("PATCH", "/api/v1/accounts/account-1/members/user-2"),
+        ("DELETE", "/api/v1/accounts/account-1/members/user-2"),
+        ("POST", "/api/v1/accounts/account-1/invite"),
+        ("GET", "/api/v1/accounts/account-1/invites"),
+        ("POST", "/api/v1/billing/credits/checkout"),
+    ]:
+        with pytest.raises(GatewayError) as denied:
+            enforce_route_role(method, path, member)
+        assert denied.value.status_code == 403
+
+    enforce_route_role("PATCH", "/api/v1/accounts/account-1/members/user-2", admin)
+    enforce_route_role("POST", "/api/v1/accounts/account-1/invite", admin)
+
+
 def test_request_and_correlation_ids(client: TestClient) -> None:
     response = client.get(
         "/health", headers={"X-Request-ID": "request-1", "X-Correlation-ID": "correlation-1"}
@@ -67,15 +98,78 @@ def test_readiness_success_and_failure(client: TestClient) -> None:
     assert response.json()["checks"]["rabbitmq"] == "unhealthy"
 
 
-def test_public_auth_is_forwarded(client: TestClient) -> None:
-    client.app.state.proxy.proxy = AsyncMock(return_value=JSONResponse({"ok": True}))
-    assert client.post("/api/v1/auth/login", json={}).status_code == 200
+def test_login_splits_refresh_token_into_httponly_cookie(client: TestClient) -> None:
+    downstream = httpx.Response(
+        200,
+        json={
+            "success": True,
+            "data": {
+                "user": {"id": "u1"},
+                "tokens": {"accessToken": "access-1", "refreshToken": "refresh-1", "expiresIn": 900},
+            },
+            "meta": {},
+        },
+    )
+    client.app.state.proxy.send = AsyncMock(return_value=downstream)
+    response = client.post("/api/v1/auth/login", json={"email": "a@b.com", "password": "x"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["tokens"]["accessToken"] == "access-1"
+    assert "refreshToken" not in body["data"]["tokens"]
+    cookie = response.cookies.get("creditflow_refresh_token")
+    assert cookie == "refresh-1"
+
+
+def test_refresh_reads_cookie_and_reissues_it(client: TestClient) -> None:
+    downstream = httpx.Response(
+        200,
+        json={
+            "success": True,
+            "data": {
+                "user": {"id": "u1"},
+                "tokens": {"accessToken": "access-2", "refreshToken": "refresh-2", "expiresIn": 900},
+            },
+            "meta": {},
+        },
+    )
+    client.app.state.proxy.send = AsyncMock(return_value=downstream)
+    client.cookies.set("creditflow_refresh_token", "refresh-1")
+    response = client.post("/api/v1/auth/refresh")
+    assert response.status_code == 200
+    forwarded_body = json.loads(client.app.state.proxy.send.await_args.kwargs["body"])
+    assert forwarded_body == {"refreshToken": "refresh-1"}
+    assert response.cookies.get("creditflow_refresh_token") == "refresh-2"
+
+
+def test_refresh_without_cookie_is_rejected(client: TestClient) -> None:
+    response = client.post("/api/v1/auth/refresh")
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "MISSING_REFRESH_TOKEN"
+
+
+def test_logout_forwards_cookie_and_clears_it(client: TestClient, auth_headers: dict[str, str]) -> None:
+    downstream = httpx.Response(200, json={"success": True, "data": {"message": "ok"}, "meta": {}})
+    client.app.state.proxy.send = AsyncMock(return_value=downstream)
+    client.cookies.set("creditflow_refresh_token", "refresh-1")
+    response = client.post("/api/v1/auth/logout", headers=auth_headers)
+    assert response.status_code == 200
+    forwarded_body = json.loads(client.app.state.proxy.send.await_args.kwargs["body"])
+    assert forwarded_body == {"refreshToken": "refresh-1"}
+    assert response.cookies.get("creditflow_refresh_token") is None
 
 
 def test_protected_route_rejected(client: TestClient) -> None:
     response = client.get("/api/v1/content")
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "AUTHENTICATION_REQUIRED"
+
+
+def test_linkedin_oauth_callback_is_public(client: TestClient) -> None:
+    # LinkedIn redirects the browser here with no bearer token; the route must
+    # bypass the auth gate (it authenticates via the opaque `state` param instead).
+    client.app.state.proxy.proxy = AsyncMock(return_value=JSONResponse({"ok": True}))
+    response = client.get("/api/v1/publishing/linkedin/callback", params={"state": "abcdefgh", "code": "c"})
+    assert response.status_code == 200
 
 
 def test_cors_preflight_does_not_require_authentication(client: TestClient) -> None:

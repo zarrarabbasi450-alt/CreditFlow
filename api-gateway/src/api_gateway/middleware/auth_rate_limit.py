@@ -21,6 +21,10 @@ PUBLIC = {
     "/api/v1/auth/verify-email",
     "/api/v1/auth/forgot-password",
     "/api/v1/auth/reset-password",
+    # LinkedIn redirects the browser here directly with no bearer token; the
+    # callback authenticates the request itself via the opaque `state` value
+    # instead (see social-publishing-service's linkedin_callback route).
+    "/api/v1/publishing/linkedin/callback",
 }
 
 

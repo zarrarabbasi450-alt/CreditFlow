@@ -1,4 +1,4 @@
-import { apiClient, request } from "./client";
+import { API_BASE_URL, apiClient, request, tokenStore } from "./client";
 import type {
   ApiResponse,
   ContentItem,
@@ -206,6 +206,8 @@ export const uploadContentImage = async (contentId: string, file: File) => {
 export const getAiOverview = () => request<ProductView>({ url: "/ai/overview", method: "GET" });
 export const getPromptHistory = async () =>
   (await request<RawPromptHistory[]>({ url: "/ai/history", method: "GET" })).map(toPromptHistory);
+export const deletePromptHistory = (id: string) =>
+  request<void>({ url: `/ai/history/${id}`, method: "DELETE" });
 export const getGeneration = (jobId: string) =>
   request<RawGenerationJob>({ url: `/ai/generations/${jobId}`, method: "GET" }).then(toGenerationJob);
 export const cancelGeneration = (jobId: string) =>
@@ -213,7 +215,39 @@ export const cancelGeneration = (jobId: string) =>
 export const generateImage = (prompt: string) =>
   request<RawImageGeneration>({ url: "/ai/images", method: "POST", data: { prompt } }).then(toImageGeneration);
 
-const sleep = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+interface SseEvent {
+  event: string;
+  data: string;
+}
+
+async function* readSseEvents(response: Response): AsyncGenerator<SseEvent> {
+  const reader = response.body?.getReader();
+  if (!reader) return;
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let separator = buffer.indexOf("\n\n");
+      while (separator !== -1) {
+        const raw = buffer.slice(0, separator);
+        buffer = buffer.slice(separator + 2);
+        let event = "message";
+        const dataLines: string[] = [];
+        for (const line of raw.split("\n")) {
+          if (line.startsWith("event:")) event = line.slice(6).trim();
+          else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+        }
+        yield { event, data: dataLines.join("\n") };
+        separator = buffer.indexOf("\n\n");
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+}
 
 export async function* streamGeneration(payload: GenerationRequest): AsyncGenerator<GenerationChunk> {
   const result = toGenerationStart(
@@ -223,41 +257,39 @@ export async function* streamGeneration(payload: GenerationRequest): AsyncGenera
       data: toGenerationPayload(payload),
     }),
   );
-  yield { type: "token", value: "Generation started. Waiting for OpenRouter...\n\n", generationId: result.jobId };
 
-  let job: GenerationJob | null = null;
-  for (let attempt = 0; attempt < 90; attempt += 1) {
-    job = await getGeneration(result.jobId);
-    if (["completed", "failed", "cancelled"].includes(job.status)) break;
-    await sleep(1000);
-  }
-
-  if (!job || !["completed", "failed", "cancelled"].includes(job.status)) {
+  const response = await fetch(`${API_BASE_URL}/ai/generations/${result.jobId}/stream`, {
+    headers: {
+      Accept: "text/event-stream",
+      Authorization: `Bearer ${tokenStore.getAccess() ?? ""}`,
+    },
+  });
+  if (!response.ok || !response.body) {
     yield {
       type: "failed",
-      value: "Generation is still running. Please refresh prompt history in a moment.",
+      value: "Unable to connect to the generation stream.",
       generationId: result.jobId,
     };
     return;
   }
 
-  if (job.status === "failed") {
-    yield {
-      type: "failed",
-      value: job.errorReason ?? "Generation failed",
-      generationId: result.jobId,
-    };
-    return;
+  let output = "";
+  for await (const { event, data } of readSseEvents(response)) {
+    if (event === "heartbeat" || !data) continue;
+    const parsed = JSON.parse(data) as { job_id?: string; value?: string; reason?: string };
+    if (event === "token" && parsed.value) {
+      output += parsed.value;
+      yield { type: "token", value: parsed.value, generationId: result.jobId };
+    } else if (event === "completed") {
+      yield { type: "complete", value: output, generationId: result.jobId, imageUrl: result.imageUrl };
+      return;
+    } else if (event === "failed") {
+      if (parsed.reason === "cancelled") {
+        yield { type: "cancelled", value: "Generation cancelled", generationId: result.jobId };
+      } else {
+        yield { type: "failed", value: parsed.reason ?? "Generation failed", generationId: result.jobId };
+      }
+      return;
+    }
   }
-
-  if (job.status === "cancelled") {
-    yield { type: "cancelled", value: "Generation cancelled", generationId: result.jobId };
-    return;
-  }
-
-  for (const token of job.response.match(/\S+\s*/g) ?? []) {
-    await sleep(18);
-    yield { type: "token", value: token, generationId: result.jobId };
-  }
-  yield { type: "complete", value: job.response, generationId: result.jobId, imageUrl: result.imageUrl };
 }

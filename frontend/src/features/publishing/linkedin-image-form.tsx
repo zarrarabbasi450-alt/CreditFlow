@@ -23,7 +23,7 @@ export function LinkedInImageForm() {
       onSubmit={handleSubmit(async (values) => {
         await publish.mutateAsync({
           caption: values.caption,
-          image: values.image,
+          imageUrl: undefined,
         });
         notify("LinkedIn image post queued");
       })}

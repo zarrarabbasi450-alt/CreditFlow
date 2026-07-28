@@ -17,7 +17,7 @@ import {
 import type { Role } from "@/types";
 export type NavItem = { label: string; href: string; icon: LucideIcon; roles?: Role[] };
 export const navigation: NavItem[] = [
-  { label: "Overview", href: "/dashboard", icon: LayoutDashboard },
+  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: ["Owner", "SuperAdmin"] },
   { label: "AI Studio", href: "/ai-studio", icon: Bot },
   { label: "Content", href: "/content", icon: Library },
   { label: "Scheduler", href: "/scheduler", icon: CalendarClock },

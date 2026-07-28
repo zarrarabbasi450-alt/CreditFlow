@@ -1,0 +1,12 @@
+aio-pika==9.5.7
+asyncpg==0.31.0
+celery==5.5.3
+fastapi==0.116.1
+orjson==3.11.2
+PyJWT[crypto]==2.10.1
+pydantic-settings==2.12.0
+python-json-logger==3.3.0
+redis==6.4.0
+SQLAlchemy[asyncio]==2.0.43
+tzdata==2026.1
+uvicorn[standard]==0.35.0

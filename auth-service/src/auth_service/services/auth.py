@@ -272,6 +272,10 @@ class AuthService:
         async with self.sessions() as session:
             return list((await session.scalars(select(User).order_by(User.created_at))).all())
 
+    async def get_user_by_id(self, user_id: UUID) -> User | None:
+        async with self.sessions() as session:
+            return await session.get(User, user_id)
+
     async def update_platform_role(self, user_id: UUID, platform_role: str | None) -> User:
         async with self.sessions() as session, session.begin():
             user = await session.get(User, user_id)

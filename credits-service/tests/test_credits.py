@@ -1,6 +1,14 @@
 from uuid import uuid4
 
-from httpx import AsyncClient
+import pytest
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
+
+from conftest import BillingStub, BusStub, DatabaseStub, IdentityStub
+from credits_service.core.config import get_settings
+from credits_service.main import create_app
+from credits_service.models import Base, CreditLedger, LedgerType
 
 
 async def test_operations_and_auth(client: AsyncClient) -> None:
@@ -62,3 +70,74 @@ async def test_credit_consumption_is_atomic_and_idempotent(
         json={"amount": 999999, "reference_id": str(uuid4()), "description": "too much"},
     )
     assert insufficient.status_code == 409
+
+
+async def test_credit_purchase_event_grants_balance() -> None:
+    account_id = uuid4()
+    engine = create_async_engine(
+        "sqlite+aiosqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        execution_options={"schema_translate_map": {"credits": None}},
+    )
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    app = create_app(DatabaseStub(sessions), BusStub(), IdentityStub(), BillingStub())
+    envelope = {
+        "event_id": str(uuid4()),
+        "event_type": "credits.purchased",
+        "correlation_id": "c1",
+        "payload": {
+            "account_id": str(account_id),
+            "credits": 500,
+            "payment_intent_id": "pi_credits",
+            "amount": 500,
+            "currency": "usd",
+        },
+    }
+    await app.state.credits.consume(envelope)
+    await app.state.credits.consume(envelope)  # duplicate delivery must not double-grant
+    assert (await app.state.credits.balance(account_id)) == 500
+    await engine.dispose()
+
+
+async def test_internal_balance_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", "shared-secret")
+    get_settings.cache_clear()
+    account_id = uuid4()
+    engine = create_async_engine(
+        "sqlite+aiosqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        execution_options={"schema_translate_map": {"credits": None}},
+    )
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    async with sessions() as session, session.begin():
+        session.add(
+            CreditLedger(
+                account_id=account_id,
+                entry_type=LedgerType.GRANT,
+                amount=250,
+                description="seed",
+                reference_type="test",
+                reference_id="seed",
+            )
+        )
+    app = create_app(DatabaseStub(sessions), BusStub(), IdentityStub(), BillingStub())
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        unauthorized = await client.get(
+            f"/api/v1/credits/internal/{account_id}/balance",
+            headers={"Authorization": "Bearer wrong-secret"},
+        )
+        assert unauthorized.status_code == 401
+        response = await client.get(
+            f"/api/v1/credits/internal/{account_id}/balance",
+            headers={"Authorization": "Bearer shared-secret"},
+        )
+        assert response.status_code == 200
+        assert response.json() == {"account_id": str(account_id), "balance": 250}
+    await engine.dispose()
+    get_settings.cache_clear()

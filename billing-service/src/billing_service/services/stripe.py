@@ -9,6 +9,9 @@ from billing_service.core.errors import BillingError
 class StripeProtocol(Protocol):
     def create_customer(self, account_id: str, name: str) -> str: ...
     def create_checkout(self, customer: str, price: str, seats: int, account_id: str) -> str: ...
+    def create_credit_checkout(
+        self, customer: str, credits: int, unit_amount_cents: int, account_id: str
+    ) -> str: ...
     def create_portal(self, customer: str) -> str: ...
     def update_subscription(
         self, subscription_id: str, item_id: str, price: str, seats: int, proration: str
@@ -57,6 +60,35 @@ class StripeService:
         )
         return str(result["url"])
 
+    def create_credit_checkout(
+        self, customer: str, credits: int, unit_amount_cents: int, account_id: str
+    ) -> str:
+        # price_data is built inline instead of referencing a pre-created Stripe Price ID,
+        # since the credit amount (and therefore the charge) is chosen per purchase.
+        metadata = {"purpose": "credit_purchase", "account_id": account_id, "credits": str(credits)}
+        result = self._call(
+            stripe.checkout.Session.create,
+            mode="payment",
+            customer=customer,
+            line_items=[
+                {
+                    "price_data": {
+                        "currency": "usd",
+                        "product_data": {"name": f"{credits:,} CreditFlow credits"},
+                        "unit_amount": unit_amount_cents,
+                    },
+                    "quantity": 1,
+                }
+            ],
+            success_url=self.settings.stripe_credit_checkout_success_url,
+            cancel_url=self.settings.stripe_credit_checkout_cancel_url,
+            client_reference_id=account_id,
+            metadata=metadata,
+            payment_intent_data={"metadata": metadata},
+            idempotency_key=f"credit-purchase-{account_id}-{credits}-{unit_amount_cents}",
+        )
+        return str(result["url"])
+
     def create_portal(self, customer: str) -> str:
         result = self._call(
             stripe.billing_portal.Session.create,
@@ -74,6 +106,10 @@ class StripeService:
             items=[{"id": item_id, "price": price, "quantity": seats}],
             proration_behavior=proration,
             payment_behavior="pending_if_incomplete" if proration == "always_invoice" else "allow_incomplete",
+            # Picking a plan is an explicit "keep this subscription" signal — it
+            # should also undo a pending cancel_at_period_end from an earlier
+            # downgrade-to-free, not just change the price while still letting it lapse.
+            cancel_at_period_end=False,
         )
 
     def cancel_subscription(self, subscription_id: str) -> dict[str, Any]:

@@ -25,6 +25,9 @@ class RedisProtocol(Protocol):
     async def login_allowed(self, email: str, ip: str, limit: int) -> bool: ...
     async def record_login_failure(self, email: str, ip: str, window: int) -> None: ...
     async def clear_login_failures(self, email: str, ip: str) -> None: ...
+    async def otp_allowed(self, email: str, ip: str, limit: int) -> bool: ...
+    async def record_otp_failure(self, email: str, ip: str, window: int) -> None: ...
+    async def clear_otp_failures(self, email: str, ip: str) -> None: ...
 
 
 class RedisService:
@@ -90,6 +93,19 @@ class RedisService:
     async def clear_login_failures(self, email: str, ip: str) -> None:
         await self.client.delete(f"auth:login:email:{email}", f"auth:login:ip:{ip}")
 
+    async def otp_allowed(self, email: str, ip: str, limit: int) -> bool:
+        email_count, ip_count = await self.client.mget(f"auth:otp:email:{email}", f"auth:otp:ip:{ip}")
+        return int(email_count or 0) < limit and int(ip_count or 0) < limit
+
+    async def record_otp_failure(self, email: str, ip: str, window: int) -> None:
+        for key in (f"auth:otp:email:{email}", f"auth:otp:ip:{ip}"):
+            count = await self.client.incr(key)
+            if count == 1:
+                await self.client.expire(key, window)
+
+    async def clear_otp_failures(self, email: str, ip: str) -> None:
+        await self.client.delete(f"auth:otp:email:{email}", f"auth:otp:ip:{ip}")
+
 
 class InMemoryRedisService:
     def __init__(self) -> None:
@@ -140,3 +156,19 @@ class InMemoryRedisService:
     async def clear_login_failures(self, email: str, ip: str) -> None:
         self.failures.pop(f"e:{email}", None)
         self.failures.pop(f"i:{ip}", None)
+
+    async def otp_allowed(self, email: str, ip: str, limit: int) -> bool:
+        now = time.monotonic()
+        return all(self.failures.get(key, (0, now))[0] < limit for key in (f"oe:{email}", f"oi:{ip}"))
+
+    async def record_otp_failure(self, email: str, ip: str, window: int) -> None:
+        now = time.monotonic()
+        for key in (f"oe:{email}", f"oi:{ip}"):
+            count, expires = self.failures.get(key, (0, now + window))
+            if expires <= now:
+                count, expires = 0, now + window
+            self.failures[key] = (count + 1, expires)
+
+    async def clear_otp_failures(self, email: str, ip: str) -> None:
+        self.failures.pop(f"oe:{email}", None)
+        self.failures.pop(f"oi:{ip}", None)

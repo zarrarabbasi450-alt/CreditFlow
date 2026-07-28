@@ -2,10 +2,17 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+import markdown
+from pydantic import BaseModel, Field, computed_field
 
 ContentStatus = Literal["draft", "approved", "published"]
 ContentType = Literal["post", "article", "campaign_brief", "carousel"]
+
+_MARKDOWN_EXTENSIONS = ["extra", "sane_lists", "nl2br"]
+
+
+def render_markdown(body: str) -> str:
+    return markdown.markdown(body, extensions=_MARKDOWN_EXTENSIONS)
 
 
 class ContentCreate(BaseModel):
@@ -41,6 +48,11 @@ class ContentRead(BaseModel):
 
     model_config = {"from_attributes": True}
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def body_html(self) -> str:
+        return render_markdown(self.body)
+
 
 class ContentVersionRead(BaseModel):
     id: UUID
@@ -55,6 +67,11 @@ class ContentVersionRead(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def body_html(self) -> str:
+        return render_markdown(self.body)
 
 
 class ProductMetric(BaseModel):

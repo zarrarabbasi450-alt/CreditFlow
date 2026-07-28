@@ -86,12 +86,28 @@ def enforce_route_role(method: str, path: str, claims: TokenClaims) -> None:
     }
     if credits_management and not is_owner(claims):
         raise GatewayError(403, "OWNER_REQUIRED", "Account Owner access is required")
+    # Team management (role changes, removal, invites) mirrors tenant-service's own
+    # Owner/Admin check — enforced here too so a Member is rejected at the edge
+    # instead of only relying on the downstream service.
+    account_member_management = path.startswith("/api/v1/accounts/") and (
+        (method in {"PATCH", "DELETE"} and "/members/" in path)
+        or (method == "POST" and path.endswith("/invite"))
+        or (method == "GET" and path.endswith("/invites"))
+    )
+    if account_member_management and not is_admin(claims):
+        raise GatewayError(403, "ADMIN_REQUIRED", "Owner or Admin access is required")
     if not path.startswith("/api/v1/billing"):
         return
     owner_only = (method == "GET" and path in {"/api/v1/billing/overview", "/api/v1/billing/invoices"}) or (
         method == "POST"
         and (
-            path in {"/api/v1/billing/portal", "/api/v1/billing/refunds", "/api/v1/billing/escrows"}
+            path
+            in {
+                "/api/v1/billing/portal",
+                "/api/v1/billing/refunds",
+                "/api/v1/billing/escrows",
+                "/api/v1/billing/credits/checkout",
+            }
             or path.startswith("/api/v1/billing/escrows/")
         )
     )

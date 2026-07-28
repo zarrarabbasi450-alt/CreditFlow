@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     jwt_issuer: str = "creditflow-auth"
     jwt_audience: str = "creditflow-api"
     rabbitmq_url: str = "amqp://guest:guest@localhost:5672/"
+    internal_service_token: str = ""
     upload_dir: str = "uploads"
     public_upload_base_url: str = "http://localhost:8007/uploads"
     log_level: str = "INFO"

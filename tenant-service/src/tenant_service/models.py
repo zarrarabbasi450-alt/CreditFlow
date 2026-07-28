@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from uuid import UUID, uuid4
 
@@ -99,4 +99,19 @@ class Invite(Base):
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class ProcessedEvent(Base):
+    """Idempotency ledger for RabbitMQ-consumed events — a redelivered message with
+    an event_id already recorded here is a no-op, never reprocessed."""
+
+    __tablename__ = "processed_events"
+    __table_args__ = (UniqueConstraint("event_id", name="uq_tenant_processed_event_id"),)
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    event_id: Mapped[UUID] = mapped_column(nullable=False)
+    event_type: Mapped[str] = mapped_column(String(255), index=True)
+    processed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )

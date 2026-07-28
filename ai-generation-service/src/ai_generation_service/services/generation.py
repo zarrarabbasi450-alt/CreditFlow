@@ -15,6 +15,7 @@ from ai_generation_service.schemas.events import (
     GenerationFailedPayload,
 )
 from ai_generation_service.schemas.generation import GenerationRequest, GenerationStartResponse, ImageResponse
+from ai_generation_service.services.credits import CreditsClientProtocol
 from ai_generation_service.services.identity import Identity
 from ai_generation_service.services.images import ImageProviderProtocol
 from ai_generation_service.services.openrouter import AIProviderProtocol
@@ -32,6 +33,7 @@ class GenerationService:
         redis: RedisProtocol,
         events: EventBusProtocol,
         usage: UsageClientProtocol,
+        credits: CreditsClientProtocol,
         ai: AIProviderProtocol,
         images: ImageProviderProtocol,
         settings: Settings,
@@ -40,6 +42,7 @@ class GenerationService:
         self.redis = redis
         self.events = events
         self.usage = usage
+        self.credits = credits
         self.ai = ai
         self.images = images
         self.settings = settings
@@ -94,7 +97,7 @@ class GenerationService:
                         image_url=image_url,
                     )
                 )
-        task = asyncio.create_task(self.run_job(job_id, correlation_id))
+        task = asyncio.create_task(self.run_job(job_id, correlation_id, bearer_token))
         task.add_done_callback(self._log_background_error)
         return GenerationStartResponse(
             job_id=job_id, channel=self.channel(job_id), model=model, status="queued", image_url=image_url
@@ -107,7 +110,7 @@ class GenerationService:
         except Exception:
             logger.exception("generation_background_task_failed")
 
-    async def run_job(self, job_id: UUID, correlation_id: str) -> None:
+    async def run_job(self, job_id: UUID, correlation_id: str, bearer_token: str) -> None:
         async with self.sessions() as session, session.begin():
             job = await session.get(GenerationJob, job_id)
             if job is None:
@@ -141,7 +144,14 @@ class GenerationService:
                         {"event": "token", "data": {"job_id": str(job_id), "value": token}},
                     )
                 await self._complete(
-                    job_id, account_id, user_id, active_model, prompt, "".join(output), correlation_id
+                    job_id,
+                    account_id,
+                    user_id,
+                    active_model,
+                    prompt,
+                    "".join(output),
+                    correlation_id,
+                    bearer_token,
                 )
                 await self.redis.publish_token(
                     self.channel(job_id), {"type": "complete", "job_id": str(job_id)}
@@ -199,6 +209,7 @@ class GenerationService:
         prompt: str,
         response: str,
         correlation_id: str,
+        bearer_token: str,
     ) -> None:
         prompt_tokens = max(1, len(prompt.split()) * 2)
         completion_tokens = max(1, len(response.split()) * 2)
@@ -258,6 +269,10 @@ class GenerationService:
                 payload=payload.model_dump(mode="json"),
             )
         )
+        credits_charged = max(1, total_tokens // 1000)
+        await self.credits.consume(
+            bearer_token, credits_charged, job_id, f"AI generation ({model})"
+        )
 
     async def _fail(
         self, job_id: UUID, account_id: UUID, user_id: UUID, model: str, reason: str, correlation_id: str
@@ -301,6 +316,27 @@ class GenerationService:
                     )
                 ).all()
             )
+
+    async def delete_history_entry(self, actor: Identity, entry_id: UUID, correlation_id: str) -> None:
+        async with self.sessions() as session, session.begin():
+            entry = await session.get(PromptHistory, entry_id)
+            if entry is None:
+                raise AIServiceError(404, "PROMPT_HISTORY_NOT_FOUND", "Prompt history entry was not found")
+            if entry.account_id != actor.account_id and not actor.is_superadmin:
+                raise AIServiceError(403, "ACCOUNT_ACCESS_DENIED", "Entry belongs to another account")
+            generation_id = entry.job_id
+            account_id = entry.account_id
+            await session.delete(entry)
+        # Deleting the audit entry also removes the content-library draft (and any
+        # schedule for it) that was auto-created from this same generation —
+        # content-service and scheduler-service react to this event in turn.
+        await self.events.publish(
+            EventEnvelope(
+                event_type="ai.generation_deleted",
+                correlation_id=correlation_id,
+                payload={"generation_id": str(generation_id), "account_id": str(account_id)},
+            )
+        )
 
     async def get_job(self, actor: Identity, job_id: UUID) -> GenerationJob:
         async with self.sessions() as session:

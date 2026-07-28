@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     login_attempt_window_seconds: int = 900
     bootstrap_superadmin_email: str = ""
     tenant_service_url: str = "http://localhost:8002"
+    internal_service_token: str = ""
     version: str = "0.1.0"
 
     @field_validator("trusted_hosts", mode="before")

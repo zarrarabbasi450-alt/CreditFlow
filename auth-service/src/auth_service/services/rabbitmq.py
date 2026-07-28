@@ -33,7 +33,7 @@ class RabbitMQPublisher:
 
     async def publish(self, routing_key: str, payload: dict[str, Any]) -> None:
         connection = await self._connection()
-        async with connection.channel() as channel:
+        async with connection.channel(publisher_confirms=True, on_return_raises=True) as channel:
             exchange = await channel.declare_exchange(
                 "creditflow.events", aio_pika.ExchangeType.TOPIC, durable=True
             )

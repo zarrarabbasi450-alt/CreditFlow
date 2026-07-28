@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     jwt_public_key_path: str = ""
     jwt_issuer: str = "creditflow-auth"
     jwt_audience: str = "creditflow-api"
+    internal_service_token: str = ""
     default_monthly_token_quota: int = 1_000_000
     log_level: str = "INFO"
     trusted_hosts: Annotated[list[str], NoDecode] = ["localhost", "127.0.0.1", "testserver"]

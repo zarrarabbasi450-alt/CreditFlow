@@ -22,6 +22,7 @@ export interface AuthUser {
   id: string;
   name: string;
   email: string;
+  accountId: string;
   role: Role;
   accountRole?: Exclude<Role, "SuperAdmin">;
   platformRole?: "SuperAdmin" | null;
@@ -31,7 +32,6 @@ export interface AuthUser {
 }
 export interface AuthTokens {
   accessToken: string;
-  refreshToken: string;
   expiresIn: number;
 }
 export interface AuthSession {
@@ -41,9 +41,6 @@ export interface AuthSession {
 export interface LoginRequest {
   email: string;
   password: string;
-}
-export interface RefreshRequest {
-  refreshToken: string;
 }
 export interface SignupRequest {
   email: string;

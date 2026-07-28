@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "creditflow-scraper-service"
+version = "0.1.0"
+requires-python = ">=3.14"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S"]
+ignore = ["S101"]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = ["playwright.*", "bs4.*", "markdown.*", "motor.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "--basetemp=.pytest-tmp --cov=src/scraper_service --cov-report=term-missing --cov-fail-under=80"
+
+[tool.coverage.run]
+omit = [
+  "src/scraper_service/database.py",
+  "src/scraper_service/core/logging.py",
+  "src/scraper_service/services/identity.py",
+  "src/scraper_service/services/crawler.py",
+  "src/scraper_service/services/rabbitmq.py",
+  "src/scraper_service/services/serp.py",
+  "src/scraper_service/services/robots.py",
+  "src/scraper_service/worker.py",
+]

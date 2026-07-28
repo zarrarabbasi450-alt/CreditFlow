@@ -84,6 +84,8 @@ export const getInvoices = async () => (await getBilling()).invoices;
 export const createCheckout = (plan: Exclude<BillingPlan, "free">, seats = 1) =>
   request<{ url: string }>({ url: "/billing/checkout", method: "POST", data: { plan, seats } });
 export const openBillingPortal = () => request<{ url: string }>({ url: "/billing/portal", method: "POST" });
+export const createCreditPurchaseCheckout = (credits: number) =>
+  request<{ url: string }>({ url: "/billing/credits/checkout", method: "POST", data: { credits } });
 export const changePlan = (plan: BillingPlan, seats = 1) =>
   request<BackendSubscription>({
     url: "/billing/subscription",

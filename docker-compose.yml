@@ -1,0 +1,297 @@
+name: creditflow
+
+# This file intentionally does NOT containerize Postgres/Redis/RabbitMQ/MongoDB.
+# This dev machine already runs long-lived infra outside this compose project
+# (a native PostgreSQL install, plus pre-existing `creditflow-redis`,
+# `creditflow-rabbitmq`, and `creditflow-mongo` containers with real data in
+# them) — every service below reaches that same infra via
+# `host.docker.internal`, which Docker Desktop resolves to the host machine.
+# Start your infra first (native Postgres running, and
+# `docker start creditflow-redis creditflow-rabbitmq creditflow-mongo` if they
+# aren't already up) before `docker compose up` on this file.
+#
+# On real deployments (AWS: RDS/ElastiCache/Amazon MQ, or any Linux host),
+# replace `host.docker.internal` below with the actual managed-service
+# endpoints.
+
+x-jwt-keys: &jwt-keys
+  - ./keys:/app/keys:ro
+
+x-common-jwt-env: &common-jwt-env
+  JWT_PUBLIC_KEY_PATH: /app/keys/public_key.pem
+  JWT_ISSUER: creditflow-auth
+  JWT_AUDIENCE: creditflow-api
+  # Shared secret used for trusted service-to-service calls (auth-internal
+  # lookups, admin-service aggregation, etc). Must be identical across every
+  # service — override it via a repo-root .env for real deployments.
+  INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev-internal-service-token-change-me}
+  # Every service's TrustedHostMiddleware otherwise rejects the Host header
+  # container-to-container calls arrive with (e.g. "auth-service:8001" instead
+  # of "localhost") — "*" disables that check. Fine for local compose; on a
+  # real deployment set this to the service's actual hostname(s) instead.
+  TRUSTED_HOSTS: ${TRUSTED_HOSTS:-*}
+
+x-postgres-url: &postgres-url postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-zarrar54321}@host.docker.internal:5432/creditflow
+x-rabbitmq-url: &rabbitmq-url amqp://guest:guest@host.docker.internal:5672/
+
+services:
+  api-gateway:
+    build: ./api-gateway
+    container_name: creditflow-api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      <<: *common-jwt-env
+      API_GATEWAY_HOST: 0.0.0.0
+      API_GATEWAY_PORT: "8080"
+      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      REDIS_URL: redis://host.docker.internal:6379/0
+      RABBITMQ_URL: *rabbitmq-url
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      LINKEDIN_WEBHOOK_SECRET: ${LINKEDIN_WEBHOOK_SECRET:-replace_me}
+      OPENROUTER_WEBHOOK_SECRET: ${OPENROUTER_WEBHOOK_SECRET:-replace_me}
+      AUTH_SERVICE_URL: http://auth-service:8001
+      USER_TENANT_SERVICE_URL: http://tenant-service:8002
+      BILLING_SERVICE_URL: http://billing-service:8003
+      CREDITS_MARKETPLACE_SERVICE_URL: http://credits-service:8004
+      USAGE_METERING_SERVICE_URL: http://usage-service:8005
+      AI_GENERATION_SERVICE_URL: http://ai-generation-service:8006
+      CONTENT_SERVICE_URL: http://content-service:8007
+      SCHEDULER_SERVICE_URL: http://scheduler-service:8108
+      SOCIAL_PUBLISHING_SERVICE_URL: http://social-publishing-service:8109
+      SCRAPER_SERVICE_URL: http://scraper-service:8110
+      NOTIFICATION_SERVICE_URL: http://notification-service:8111
+      ADMIN_OPS_SERVICE_URL: http://admin-service:8112
+    volumes: *jwt-keys
+
+  auth-service:
+    build: ./auth-service
+    container_name: creditflow-auth-service
+    ports:
+      - "8001:8001"
+    environment:
+      <<: *common-jwt-env
+      DATABASE_URL: *postgres-url
+      DATABASE_SCHEMA: auth
+      REDIS_URL: redis://host.docker.internal:6379/0
+      RABBITMQ_URL: *rabbitmq-url
+      JWT_PRIVATE_KEY_PATH: /app/keys/private_key.pem
+      TENANT_SERVICE_URL: http://tenant-service:8002
+      BOOTSTRAP_SUPERADMIN_EMAIL: ${BOOTSTRAP_SUPERADMIN_EMAIL:-}
+    volumes: *jwt-keys
+
+  tenant-service:
+    build: ./tenant-service
+    container_name: creditflow-tenant-service
+    ports:
+      - "8002:8002"
+    environment:
+      <<: *common-jwt-env
+      DATABASE_URL: *postgres-url
+      DATABASE_SCHEMA: tenant
+      RABBITMQ_URL: *rabbitmq-url
+    volumes: *jwt-keys
+
+  billing-service:
+    build: ./billing-service
+    container_name: creditflow-billing-service
+    ports:
+      - "8003:8003"
+    environment:
+      <<: *common-jwt-env
+      DATABASE_URL: *postgres-url
+      DATABASE_SCHEMA: billing
+      RABBITMQ_URL: *rabbitmq-url
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-sk_test_CHANGE_ME}
+      STRIPE_PRO_PRICE_ID: ${STRIPE_PRO_PRICE_ID:-price_CHANGE_ME}
+      STRIPE_TEAM_PRICE_ID: ${STRIPE_TEAM_PRICE_ID:-price_CHANGE_ME}
+      STRIPE_ENTERPRISE_PRICE_ID: ${STRIPE_ENTERPRISE_PRICE_ID:-price_CHANGE_ME}
+    volumes: *jwt-keys
+
+  credits-service:
+    build: ./credits-service
+    container_name: creditflow-credits-service
+    ports:
+      - "8004:8004"
+    environment:
+      <<: *common-jwt-env
+      DATABASE_URL: *postgres-url
+      DATABASE_SCHEMA: credits
+      RABBITMQ_URL: *rabbitmq-url
+      BILLING_SERVICE_URL: http://billing-service:8003
+    volumes: *jwt-keys
+
+  usage-service:
+    build: ./usage-service
+    container_name: creditflow-usage-service
+    ports:
+      - "8005:8005"
+    environment:
+      <<: *common-jwt-env
+      DATABASE_URL: *postgres-url
+      DATABASE_SCHEMA: usage
+      REDIS_URL: redis://host.docker.internal:6379/3
+      RABBITMQ_URL: *rabbitmq-url
+    volumes: *jwt-keys
+
+  ai-generation-service:
+    build: ./ai-generation-service
+    container_name: creditflow-ai-generation-service
+    ports:
+      - "8006:8006"
+    environment:
+      <<: *common-jwt-env
+      DATABASE_URL: *postgres-url
+      DATABASE_SCHEMA: ai_generation
+      REDIS_URL: redis://host.docker.internal:6379/4
+      RABBITMQ_URL: *rabbitmq-url
+      USAGE_SERVICE_URL: http://usage-service:8005
+      CREDITS_SERVICE_URL: http://credits-service:8004
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_SITE_URL: http://localhost:3000
+    volumes: *jwt-keys
+
+  content-service:
+    build: ./content-service
+    container_name: creditflow-content-service
+    ports:
+      - "8007:8007"
+    environment:
+      <<: *common-jwt-env
+      DATABASE_URL: *postgres-url
+      DATABASE_SCHEMA: content
+      RABBITMQ_URL: *rabbitmq-url
+      PUBLIC_UPLOAD_BASE_URL: http://localhost:8007/uploads
+    volumes: *jwt-keys
+
+  scheduler-service:
+    build: ./scheduler-service
+    container_name: creditflow-scheduler-service
+    ports:
+      - "8108:8108"
+    environment: &scheduler-env
+      <<: *common-jwt-env
+      DATABASE_URL: *postgres-url
+      DATABASE_SCHEMA: scheduler
+      REDIS_URL: redis://host.docker.internal:6379/4
+      CELERY_BROKER_URL: redis://host.docker.internal:6379/4
+      CELERY_RESULT_BACKEND: redis://host.docker.internal:6379/4
+      RABBITMQ_URL: *rabbitmq-url
+    volumes: *jwt-keys
+
+  scheduler-worker:
+    build: ./scheduler-service
+    container_name: creditflow-scheduler-worker
+    command: ["celery", "-A", "scheduler_service.worker.celery_app", "worker", "--beat", "--loglevel=info"]
+    environment: *scheduler-env
+    volumes: *jwt-keys
+
+  social-publishing-service:
+    build: ./social-publishing-service
+    container_name: creditflow-social-publishing-service
+    ports:
+      - "8109:8109"
+    environment:
+      <<: *common-jwt-env
+      DATABASE_URL: *postgres-url
+      DATABASE_SCHEMA: social
+      RABBITMQ_URL: *rabbitmq-url
+      CONTENT_SERVICE_URL: http://content-service:8007
+      LINKEDIN_REDIRECT_URI: http://localhost:8080/api/v1/publishing/linkedin/callback
+      LINKEDIN_CLIENT_ID: ${LINKEDIN_CLIENT_ID:-}
+      LINKEDIN_CLIENT_SECRET: ${LINKEDIN_CLIENT_SECRET:-}
+      SOCIAL_TOKEN_ENCRYPTION_KEY: ${SOCIAL_TOKEN_ENCRYPTION_KEY:-}
+      FRONTEND_URL: http://localhost:3000
+    volumes: *jwt-keys
+
+  scraper-service:
+    build: ./scraper-service
+    container_name: creditflow-scraper-service
+    ports:
+      - "8110:8110"
+    environment: &scraper-env
+      <<: *common-jwt-env
+      MONGODB_URL: mongodb://host.docker.internal:27017
+      MONGODB_DATABASE: creditflow_scraper
+      RABBITMQ_URL: *rabbitmq-url
+      FRONTEND_URL: http://localhost:3000
+      SERPAPI_API_KEY: ${SERPAPI_API_KEY:-}
+    volumes: *jwt-keys
+
+  scraper-worker:
+    build: ./scraper-service
+    container_name: creditflow-scraper-worker
+    command: ["python", "-m", "scraper_service.worker"]
+    environment: *scraper-env
+    volumes: *jwt-keys
+
+  notification-service:
+    build: ./notification-service
+    container_name: creditflow-notification-service
+    ports:
+      - "8111:8111"
+    environment:
+      <<: *common-jwt-env
+      DATABASE_URL: *postgres-url
+      DATABASE_SCHEMA: notifications
+      RABBITMQ_URL: *rabbitmq-url
+      AUTH_SERVICE_URL: http://auth-service:8001
+      TENANT_SERVICE_URL: http://tenant-service:8002
+      FRONTEND_URL: http://localhost:3000
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-resend}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REFRESH_TOKEN: ${GOOGLE_REFRESH_TOKEN:-}
+      GMAIL_SENDER_EMAIL: ${GMAIL_SENDER_EMAIL:-}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+    volumes: *jwt-keys
+
+  admin-service:
+    build: ./admin-service
+    container_name: creditflow-admin-service
+    ports:
+      - "8112:8112"
+    environment:
+      <<: *common-jwt-env
+      DATABASE_URL: *postgres-url
+      DATABASE_SCHEMA: admin
+      RABBITMQ_URL: *rabbitmq-url
+      REDIS_URL: redis://host.docker.internal:6379/0
+      AUTH_SERVICE_URL: http://auth-service:8001
+      TENANT_SERVICE_URL: http://tenant-service:8002
+      BILLING_SERVICE_URL: http://billing-service:8003
+      CREDITS_SERVICE_URL: http://credits-service:8004
+      USAGE_SERVICE_URL: http://usage-service:8005
+      AI_GENERATION_SERVICE_URL: http://ai-generation-service:8006
+      CONTENT_SERVICE_URL: http://content-service:8007
+      SCHEDULER_SERVICE_URL: http://scheduler-service:8108
+      SOCIAL_PUBLISHING_SERVICE_URL: http://social-publishing-service:8109
+      SCRAPER_SERVICE_URL: http://scraper-service:8110
+      NOTIFICATION_SERVICE_URL: http://notification-service:8111
+    volumes: *jwt-keys
+
+  frontend:
+    build:
+      context: ./frontend
+      # NEXT_PUBLIC_* vars are inlined into the client bundle by `next build` —
+      # setting them only under `environment:` below has no effect on browser code,
+      # since that's runtime-only and the build already happened. They must also
+      # be passed as build args so the values actually reach the compiled bundle.
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:8080/api/v1
+        NEXT_PUBLIC_APP_NAME: CreditFlow
+        NEXT_PUBLIC_ENV: development
+        NEXT_PUBLIC_ENABLE_MOCKS: "false"
+        NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-pk_test_CHANGE_ME}
+    container_name: creditflow-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8080/api/v1
+      NEXT_PUBLIC_APP_NAME: CreditFlow
+      NEXT_PUBLIC_ENV: development
+      NEXT_PUBLIC_ENABLE_MOCKS: "false"
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-pk_test_CHANGE_ME}
+    depends_on:
+      - api-gateway

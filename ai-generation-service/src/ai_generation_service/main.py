@@ -11,6 +11,7 @@ from ai_generation_service.core.errors import AIServiceError, ai_error_handler
 from ai_generation_service.core.logging import configure_logging
 from ai_generation_service.database import Database, DatabaseProtocol
 from ai_generation_service.middleware import RequestContextMiddleware
+from ai_generation_service.services.credits import CreditsClient, CreditsClientProtocol
 from ai_generation_service.services.generation import GenerationService
 from ai_generation_service.services.identity import IdentityServiceProtocol, JWTIdentityService
 from ai_generation_service.services.images import ImageProviderProtocol, PollinationsImageProvider
@@ -25,6 +26,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
     await app.state.ai.close()
     await app.state.usage.close()
+    await app.state.credits.close()
     await app.state.events.close()
     await app.state.redis.close()
     await app.state.database.close()
@@ -35,6 +37,7 @@ def create_app(
     redis: RedisProtocol | None = None,
     events: EventBusProtocol | None = None,
     usage: UsageClientProtocol | None = None,
+    credits: CreditsClientProtocol | None = None,
     ai: AIProviderProtocol | None = None,
     images: ImageProviderProtocol | None = None,
     identity: IdentityServiceProtocol | None = None,
@@ -52,6 +55,7 @@ def create_app(
     app.state.redis = redis or RedisService(settings.redis_url)
     app.state.events = events or RabbitMQService(settings.rabbitmq_url)
     app.state.usage = usage or UsageClient(settings)
+    app.state.credits = credits or CreditsClient(settings)
     app.state.ai = ai or OpenRouterProvider(settings)
     app.state.images = images or PollinationsImageProvider(settings)
     app.state.identity = identity or JWTIdentityService(settings)
@@ -60,6 +64,7 @@ def create_app(
         app.state.redis,
         app.state.events,
         app.state.usage,
+        app.state.credits,
         app.state.ai,
         app.state.images,
         settings,

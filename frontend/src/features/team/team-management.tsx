@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Trash2, UserPlus } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import {
   getCurrentAccount,
   listAccountInvites,
@@ -22,6 +23,7 @@ export function TeamManagement({ subsection }: { subsection?: string }) {
   const client = useQueryClient();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Role>("Member");
+  const [pendingRemoval, setPendingRemoval] = useState<string | null>(null);
   const account = useQuery({ queryKey: ["selected-account"], queryFn: getCurrentAccount });
   const members = useQuery({
     queryKey: ["account-members", account.data?.id],
@@ -48,7 +50,10 @@ export function TeamManagement({ subsection }: { subsection?: string }) {
   });
   const remove = useMutation({
     mutationFn: (userId: string) => removeAccountMember(account.data!.id, userId),
-    onSuccess: refresh,
+    onSuccess: () => {
+      refresh();
+      setPendingRemoval(null);
+    },
   });
   const viewerRole = user?.platformRole === "SuperAdmin" ? "SuperAdmin" : (user?.accountRole ?? user?.role);
   const canManage = viewerRole === "Owner" || viewerRole === "Admin" || viewerRole === "SuperAdmin";
@@ -126,7 +131,7 @@ export function TeamManagement({ subsection }: { subsection?: string }) {
               <button
                 aria-label={`Remove ${member.user_id}`}
                 disabled={!canManageMember(member.role) || member.user_id === user?.id || remove.isPending}
-                onClick={() => remove.mutate(member.user_id)}
+                onClick={() => setPendingRemoval(member.user_id)}
               >
                 <Trash2 />
               </button>
@@ -140,6 +145,17 @@ export function TeamManagement({ subsection }: { subsection?: string }) {
           {(members.error ?? invitations.error ?? update.error ?? remove.error)?.message}
         </p>
       )}
+      <ConfirmDialog
+        open={pendingRemoval !== null}
+        title="Remove team member?"
+        description="They will immediately lose access to this workspace. This can't be undone."
+        confirmLabel="Remove member"
+        busy={remove.isPending}
+        onCancel={() => setPendingRemoval(null)}
+        onConfirm={() => {
+          if (pendingRemoval) remove.mutate(pendingRemoval);
+        }}
+      />
     </div>
   );
 }

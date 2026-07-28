@@ -32,6 +32,7 @@ class RabbitMQService:
         channel = await (await self._connect()).channel()
         await channel.set_qos(prefetch_count=20)
         exchange = await channel.declare_exchange("billing_events", ExchangeType.TOPIC, durable=True)
+        dlx = await channel.declare_exchange("billing_events.dlx", ExchangeType.TOPIC, durable=True)
         queue = await channel.declare_queue(
             "credits-service.billing-events",
             durable=True,
@@ -41,8 +42,13 @@ class RabbitMQService:
                 "x-dead-letter-exchange": "billing_events.dlx",
             },
         )
+        dead_letter_queue = await channel.declare_queue(
+            "credits-service.billing-events.dead-letter", durable=True
+        )
         await queue.bind(exchange, "invoice.paid")
         await queue.bind(exchange, "refund.issued")
+        await queue.bind(exchange, "credits.purchased")
+        await dead_letter_queue.bind(dlx, "#")
 
         async def consume(message: AbstractIncomingMessage) -> None:
             async with message.process(requeue=True):

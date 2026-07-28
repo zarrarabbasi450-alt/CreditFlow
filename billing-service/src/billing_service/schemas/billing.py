@@ -12,6 +12,10 @@ class CheckoutRequest(BaseModel):
     seats: int = Field(default=1, ge=1, le=1000)
 
 
+class CreditCheckoutRequest(BaseModel):
+    credits: int = Field(ge=100, le=1_000_000)
+
+
 class PlanChangeRequest(BaseModel):
     plan: Plan
     seats: int = Field(default=1, ge=1, le=1000)

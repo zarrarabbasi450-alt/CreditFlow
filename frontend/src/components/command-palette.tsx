@@ -47,6 +47,9 @@ export function CommandPalette() {
               </button>
             </div>
             <div className="command-results">
+              {navigation.filter((i) => i.label.toLowerCase().includes(q.toLowerCase())).length === 0 && (
+                <p className="command-empty">No pages match &quot;{q}&quot;.</p>
+              )}
               {navigation
                 .filter((i) => i.label.toLowerCase().includes(q.toLowerCase()))
                 .map((item) => (

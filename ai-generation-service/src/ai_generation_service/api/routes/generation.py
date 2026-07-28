@@ -3,7 +3,7 @@ from collections.abc import AsyncIterator
 from typing import Annotated, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 
 from ai_generation_service.api.dependencies import get_identity
@@ -93,6 +93,15 @@ async def history(
     return [
         PromptHistoryResponse.model_validate(item) for item in await service(request).history(actor, limit)
     ]
+
+
+@router.delete(
+    "/history/{entry_id}", status_code=status.HTTP_204_NO_CONTENT, operation_id="delete_prompt_history_entry"
+)
+async def delete_history_entry(entry_id: UUID, request: Request, actor: Actor) -> Response:
+    correlation_id = str(getattr(request.state, "correlation_id", getattr(request.state, "request_id", "")))
+    await service(request).delete_history_entry(actor, entry_id, correlation_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/images", response_model=ImageResponse, operation_id="generate_image")

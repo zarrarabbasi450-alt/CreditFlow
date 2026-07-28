@@ -26,8 +26,9 @@ export function LoginForm() {
       className="auth-form"
       onSubmit={handleSubmit(async (values) => {
         try {
-          await login(values.email, values.password);
-          router.push(search.get("next") ?? "/dashboard");
+          const user = await login(values.email, values.password);
+          const fallback = user.role === "Owner" || user.role === "SuperAdmin" ? "/dashboard" : "/content";
+          router.push(search.get("next") ?? fallback);
         } catch (error) {
           setError("root", { message: (error as Error).message });
         }

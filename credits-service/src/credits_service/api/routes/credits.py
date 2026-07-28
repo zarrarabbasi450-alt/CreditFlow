@@ -4,6 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 
 from credits_service.api.dependencies import get_identity, require_owner
+from credits_service.core.errors import CreditsError
 from credits_service.models import CreditLedger
 from credits_service.schemas.credits import (
     BalanceResponse,
@@ -54,6 +55,19 @@ async def ledger_responses(values: list[CreditLedger], account_id: UUID) -> list
         for value in values
         if value.account_id == account_id
     ]
+
+
+@router.get("/internal/{account_id}/balance", response_model=BalanceResponse)
+async def balance_internal(
+    account_id: UUID, request: Request, authorization: str = Header()
+) -> BalanceResponse:
+    """Trusted service-to-service lookup — guarded by a shared secret, not a user
+    JWT. Used by admin-service to build its per-account operational overview."""
+    settings = request.app.state.settings
+    token = authorization.removeprefix("Bearer ").strip()
+    if not settings.internal_service_token or token != settings.internal_service_token:
+        raise CreditsError(401, "INVALID_INTERNAL_TOKEN", "Internal service token is invalid")
+    return BalanceResponse(account_id=account_id, balance=await service(request).balance(account_id))
 
 
 @router.get("/balance", response_model=BalanceResponse)

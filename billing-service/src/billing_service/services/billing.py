@@ -11,6 +11,7 @@ from billing_service.core.errors import BillingError
 from billing_service.models import Invoice, OutboxEvent, Plan, Refund, Subscription, SubscriptionEvent
 from billing_service.schemas.billing import (
     CheckoutRequest,
+    CreditCheckoutRequest,
     EscrowCreateRequest,
     PlanChangeRequest,
     RefundRequest,
@@ -74,9 +75,26 @@ class BillingService:
 
     async def checkout(self, account_id: UUID, payload: CheckoutRequest) -> str:
         subscription = await self.subscription(account_id)
+        if subscription.stripe_subscription_id and subscription.status not in {"canceled", "downgraded"}:
+            # Starting a fresh Checkout Session here would create a second, unrelated
+            # Stripe subscription instead of changing the existing one — leaving the
+            # old one still billing in the background. Plan changes on an existing
+            # subscription must go through change_plan()/PATCH /billing/subscription.
+            raise BillingError(
+                409,
+                "SUBSCRIPTION_ALREADY_ACTIVE",
+                "An active subscription already exists — change your plan instead of starting a new checkout",
+            )
         price = self._price(payload.plan)
         return self.stripe.create_checkout(
             subscription.stripe_customer_id, price, payload.seats, str(account_id)
+        )
+
+    async def credit_checkout(self, account_id: UUID, payload: CreditCheckoutRequest) -> str:
+        subscription = await self.subscription(account_id)
+        unit_amount_cents = payload.credits * self.settings.credit_price_cents
+        return self.stripe.create_credit_checkout(
+            subscription.stripe_customer_id, payload.credits, unit_amount_cents, str(account_id)
         )
 
     async def portal(self, account_id: UUID) -> str:
@@ -119,7 +137,11 @@ class BillingService:
                 payload.seats,
                 payload.proration_behavior,
             )
-            subscription.plan, subscription.seats = payload.plan, payload.seats
+            subscription.plan, subscription.seats, subscription.status = (
+                payload.plan,
+                payload.seats,
+                "active",
+            )
         async with self.sessions() as session, session.begin():
             merged = await session.merge(subscription)
             session.add(
@@ -315,6 +337,24 @@ class BillingService:
                     correlation_id,
                 )
             )
+        elif event_type == "checkout.session.completed" and metadata.get("purpose") == "credit_purchase":
+            credit_account_id = str(metadata.get("account_id", ""))
+            credits = int(metadata.get("credits", 0))
+            if credit_account_id and credits > 0:
+                session.add(
+                    self._outbox(
+                        "credits.purchased",
+                        str(data.get("id")),
+                        {
+                            "account_id": credit_account_id,
+                            "credits": credits,
+                            "payment_intent_id": self._id(data.get("payment_intent")),
+                            "amount": int(data.get("amount_total", 0)),
+                            "currency": str(data.get("currency", "usd")),
+                        },
+                        correlation_id,
+                    )
+                )
 
     async def downgrade_overdue(self) -> int:
         now = datetime.now(UTC)

@@ -1,5 +1,13 @@
 import { request } from "./client";
-import type { AdminAccount, AdminOverview, AdminUser, FeatureFlag } from "@/types";
+import type {
+  AdminAccount,
+  AdminAccountSummary,
+  AdminOverview,
+  AdminSession,
+  AdminUser,
+  AuditEvent,
+  FeatureFlag,
+} from "@/types";
 export const getAdminOverview = () =>
   request<AdminOverview>({
     url: "/admin/overview",
@@ -14,4 +22,20 @@ export const updatePlatformRole = (userId: string, platformRole: "SuperAdmin" | 
     url: `/auth/admin/users/${userId}/platform-role`,
     method: "PATCH",
     data: { platformRole },
+  });
+export const listSessions = (accountId?: string) =>
+  request<AdminSession[]>({
+    url: "/admin/sessions",
+    method: "GET",
+    params: accountId ? { account_id: accountId } : undefined,
+  });
+export const revokeSession = (jti: string) =>
+  request<void>({ url: `/admin/sessions/${jti}`, method: "DELETE" });
+export const getAccountSummary = (accountId: string) =>
+  request<AdminAccountSummary>({ url: `/admin/accounts/${accountId}/summary`, method: "GET" });
+export const listAudit = (accountId?: string) =>
+  request<AuditEvent[]>({
+    url: "/admin/audit",
+    method: "GET",
+    params: accountId ? { account_id: accountId } : undefined,
   });

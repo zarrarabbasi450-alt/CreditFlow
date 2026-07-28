@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, Image as ImageIcon, Send, Trash2 } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Image as ImageIcon, Send, Trash2 } from "lucide-react";
 import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import { useToast } from "@/components/toast";
@@ -51,6 +51,20 @@ export function ContentManagement({ subsection }: { subsection?: string }) {
     setBody(selected.body);
     setContentType(selected.contentType);
   }, [selected]);
+
+  function startNewDraft() {
+    setSelectedId(null);
+    setTitle("");
+    setBody("");
+    setContentType("post");
+    setFeedback(null);
+    document.getElementById("content-title")?.focus();
+  }
+
+  useEffect(() => {
+    window.addEventListener("content:new-draft", startNewDraft);
+    return () => window.removeEventListener("content:new-draft", startNewDraft);
+  }, []);
 
   const busy =
     mutations.create.isPending ||
@@ -128,8 +142,14 @@ export function ContentManagement({ subsection }: { subsection?: string }) {
   return (
     <div className="content-management">
       <aside className="content-library">
-        <div>
+        <div className="content-library-header">
           <strong>Library</strong>
+          {selected && (
+            <button type="button" className="content-library-back" onClick={startNewDraft}>
+              <ArrowLeft />
+              Back
+            </button>
+          )}
         </div>
         {visibleItems.length === 0 && <p>No {filter ?? "content"} items yet.</p>}
         {visibleItems.map((item) => (

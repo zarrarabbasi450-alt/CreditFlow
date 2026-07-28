@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { AuthLayout } from "@/components/auth-layout";
 import { SignupForm } from "@/features/auth/signup-form";
 export default function Signup() {
@@ -12,7 +13,9 @@ export default function Signup() {
         </>
       }
     >
-      <SignupForm />
+      <Suspense fallback={<div className="form-skeleton" />}>
+        <SignupForm />
+      </Suspense>
     </AuthLayout>
   );
 }

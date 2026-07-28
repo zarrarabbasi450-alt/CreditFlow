@@ -7,12 +7,12 @@ export interface ServiceHealth {
 }
 export interface AuditEvent {
   id: string;
-  actorId: string;
-  accountId?: string;
+  actorId: string | null;
+  accountId?: string | null;
   action: string;
   resource: string;
   createdAt: string;
-  correlationId: string;
+  correlationId: string | null;
 }
 export interface FeatureFlag {
   key: string;
@@ -46,4 +46,22 @@ export interface AdminOverview {
   health: ServiceHealth[];
   audit: AuditEvent[];
   flags: FeatureFlag[];
+}
+
+export interface AdminSession {
+  jti: string;
+  user_id: string;
+  account_id: string;
+  account_role: string;
+  platform_role: "SuperAdmin" | null;
+}
+
+export interface AdminAccountSummary {
+  account_id: string;
+  plan_tier: string | null;
+  seat_count: number | null;
+  member_count: number | null;
+  credit_balance: number | null;
+  usage_tokens: number | null;
+  usage_quota_tokens: number | null;
 }

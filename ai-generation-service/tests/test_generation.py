@@ -5,6 +5,7 @@ from typing import Any, cast
 from httpx import AsyncClient
 
 from ai_generation_service.core.errors import AIServiceError
+from ai_generation_service.services.credits import InMemoryCreditsClient
 from ai_generation_service.services.rabbitmq import InMemoryEventBus
 from ai_generation_service.services.redis import InMemoryRedisService
 from ai_generation_service.services.usage import InMemoryUsageClient
@@ -56,11 +57,29 @@ async def test_generation_persists_history_and_publishes_events(
     assert ownership.json()["account_id"]
     history = await client.get("/api/v1/ai/history", headers=auth)
     assert history.status_code == 200 and len(history.json()) == 1
+    credits = cast(InMemoryCreditsClient, context["credits"])
+    assert len(credits.consumed) == 1
+    token, amount, reference_id, description = credits.consumed[0]
+    assert token == "owner"  # noqa: S105
+    assert amount == 1
+    assert str(reference_id) == body["job_id"]
+    assert "fast" in description or "openai" in description
     redis = cast(InMemoryRedisService, context["redis"])
     stream_events = redis.messages[f"ai:stream:{job.json()['account_id']}:{body['job_id']}"]
     assert [event["event"] for event in stream_events] == ["token", "token", "token", "completed"]
     events = cast(InMemoryEventBus, context["events"]).events
     assert [event.event_type for event in events] == ["ai.generation_completed"]
+
+    entry_id = history.json()[0]["id"]
+    deleted = await client.delete(f"/api/v1/ai/history/{entry_id}", headers=auth)
+    assert deleted.status_code == 204
+    history_after = await client.get("/api/v1/ai/history", headers=auth)
+    assert history_after.json() == []
+    assert [event.event_type for event in events] == ["ai.generation_completed", "ai.generation_deleted"]
+    assert events[-1].payload["generation_id"] == body["job_id"]
+
+    missing = await client.delete(f"/api/v1/ai/history/{entry_id}", headers=auth)
+    assert missing.status_code == 404
 
 
 async def test_quota_denial_blocks_generation(context: dict[str, Any], auth: dict[str, str]) -> None:

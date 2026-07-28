@@ -7,8 +7,14 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from billing_service.core.config import Settings
+from billing_service.core.errors import BillingError
 from billing_service.models import Base, OutboxEvent, SubscriptionEvent
-from billing_service.schemas.billing import CheckoutRequest, PlanChangeRequest, RefundRequest
+from billing_service.schemas.billing import (
+    CheckoutRequest,
+    CreditCheckoutRequest,
+    PlanChangeRequest,
+    RefundRequest,
+)
 from billing_service.services.billing import BillingService
 from billing_service.services.outbox import OutboxPublisher
 from conftest import ACCOUNT_ID, BusStub, StripeStub
@@ -53,6 +59,37 @@ async def test_account_checkout_plan_and_portal(service: BillingService) -> None
     assert updated.plan == "team" and updated.seats == 4
     free = await service.change_plan(ACCOUNT_ID, PlanChangeRequest(plan="free"), "c3")
     assert free.status == "canceling"
+
+
+async def test_checkout_blocked_once_a_subscription_is_active(service: BillingService) -> None:
+    account_id = uuid4()
+    await service.create_account_customer({"account_id": str(account_id), "name": "Acme"}, "c1")
+    await service.checkout(account_id, CheckoutRequest(plan="pro", seats=1))
+
+    # Simulate the customer.subscription.created webhook that would normally follow
+    # a real Checkout completion — this is what should make a second Checkout unsafe.
+    subscription = await service.subscription(account_id)
+    subscription.stripe_subscription_id = "sub_active"
+    subscription.stripe_subscription_item_id = "si_active"
+    subscription.status = "active"
+    async with service.sessions() as session, session.begin():
+        await session.merge(subscription)
+
+    with pytest.raises(BillingError) as blocked:
+        await service.checkout(account_id, CheckoutRequest(plan="enterprise", seats=1))
+    assert blocked.value.code == "SUBSCRIPTION_ALREADY_ACTIVE"
+
+    # Changing plan on the existing subscription (the correct path) must still work
+    # and reactivates the local status.
+    reactivated = await service.change_plan(account_id, PlanChangeRequest(plan="team", seats=1), "c2")
+    assert reactivated.plan == "team" and reactivated.status == "active"
+
+    # Once the subscription has actually ended, Checkout is safe to use again.
+    subscription = await service.subscription(account_id)
+    subscription.status = "canceled"
+    async with service.sessions() as session, session.begin():
+        await session.merge(subscription)
+    assert (await service.checkout(account_id, CheckoutRequest(plan="pro", seats=1))).startswith("https://")
 
 
 async def test_webhooks_refund_and_dunning(service: BillingService) -> None:
@@ -105,6 +142,65 @@ async def test_webhooks_refund_and_dunning(service: BillingService) -> None:
         await session.merge(subscription)
     assert await service.downgrade_overdue() == 1
     assert (await service.subscription(ACCOUNT_ID)).plan == "free"
+
+
+async def test_credit_purchase_checkout_and_webhook(service: BillingService) -> None:
+    await service.create_account_customer({"account_id": str(ACCOUNT_ID), "name": "Acme"}, "c1")
+    url = await service.credit_checkout(ACCOUNT_ID, CreditCheckoutRequest(credits=500))
+    assert url.startswith("https://") and "credits=500" in url and "amount=500" in url
+
+    event = {
+        "correlation_id": "credits-1",
+        "payload": {
+            "provider_event_id": "evt_credit_purchase",
+            "event_type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "id": "cs_test",
+                    "customer": f"cus_{str(ACCOUNT_ID)[:8]}",
+                    "mode": "payment",
+                    "amount_total": 500,
+                    "currency": "usd",
+                    "payment_intent": "pi_credits",
+                    "metadata": {
+                        "purpose": "credit_purchase",
+                        "account_id": str(ACCOUNT_ID),
+                        "credits": "500",
+                    },
+                }
+            },
+        },
+    }
+    await service.handle_gateway_event(event)
+    async with service.sessions() as session:
+        outbox = await session.scalar(
+            select(OutboxEvent).where(OutboxEvent.event_type == "credits.purchased")
+        )
+        assert outbox is not None
+        assert outbox.payload["account_id"] == str(ACCOUNT_ID)
+        assert outbox.payload["credits"] == 500
+        assert outbox.payload["payment_intent_id"] == "pi_credits"
+
+    # A non-purchase checkout (e.g. a plain subscription session) must not
+    # be mistaken for a credit purchase just because it also completed.
+    subscription_event = {
+        **event,
+        "payload": {
+            **event["payload"],
+            "provider_event_id": "evt_subscription_checkout",
+            "data": {"object": {**event["payload"]["data"]["object"], "metadata": {}}},
+        },
+    }
+    await service.handle_gateway_event(subscription_event)
+    async with service.sessions() as session:
+        purchases = list(
+            (
+                await session.scalars(
+                    select(OutboxEvent).where(OutboxEvent.event_type == "credits.purchased")
+                )
+            ).all()
+        )
+    assert len(purchases) == 1
 
 
 async def test_missing_records(service: BillingService) -> None:

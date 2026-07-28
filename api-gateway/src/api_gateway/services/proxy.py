@@ -61,7 +61,20 @@ class ProxyService:
             media_type=response.headers.get("content-type"),
         )
 
-    async def _send(self, service: str, path: str, request: Request) -> httpx.Response:
+    async def send(
+        self, service: str, path: str, request: Request, body: bytes | None = None
+    ) -> httpx.Response:
+        """Like proxy(), but returns the raw downstream response for callers that need
+        to inspect or rewrite the body/headers (e.g. moving a refresh token into a cookie)
+        instead of passing it straight through to the browser."""
+        response = await self._send(service, path, request, body_override=body)
+        if response.status_code >= 400:
+            raise self._downstream_error(response)
+        return response
+
+    async def _send(
+        self, service: str, path: str, request: Request, body_override: bytes | None = None
+    ) -> httpx.Response:
         if service not in self.service_urls:
             raise GatewayError(404, "ROUTE_NOT_FOUND", "No downstream service matches this route")
         headers = {
@@ -82,12 +95,15 @@ class ProxyService:
             {"X-Request-ID": request.state.request_id, "X-Correlation-ID": request.state.correlation_id}
         )
         try:
-            try:
-                body = await request.body()
-            except RuntimeError as exc:
-                if str(exc) != "Receive channel has not been made available":
-                    raise
-                body = b""
+            if body_override is not None:
+                body = body_override
+            else:
+                try:
+                    body = await request.body()
+                except RuntimeError as exc:
+                    if str(exc) != "Receive channel has not been made available":
+                        raise
+                    body = b""
             return await self.client.request(
                 request.method,
                 f"{self.service_urls[service]}{path}",

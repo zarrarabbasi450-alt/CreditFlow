@@ -2,6 +2,7 @@
 import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
 import { loadStripe } from "@stripe/stripe-js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Trash2 } from "lucide-react";
 import { useState } from "react";
 import {
   cancelCreditPurchase,
@@ -11,6 +12,7 @@ import {
   getCredits,
   purchaseCredits,
 } from "@/lib/api/credits";
+import { createCreditPurchaseCheckout } from "@/lib/api/billing";
 import { useAuth } from "@/hooks/useAuth";
 
 const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "";
@@ -73,6 +75,15 @@ export function CreditsManagement({ subsection }: { subsection?: string }) {
   const [price, setPrice] = useState("");
   const [payment, setPayment] = useState<Payment | null>(null);
   const [configurationError, setConfigurationError] = useState("");
+  const [buyCredits, setBuyCredits] = useState("");
+  const viewerRole = user?.platformRole === "SuperAdmin" ? "SuperAdmin" : (user?.accountRole ?? user?.role);
+  const canBuyCredits = viewerRole === "Owner" || viewerRole === "SuperAdmin";
+  const buy = useMutation({
+    mutationFn: createCreditPurchaseCheckout,
+    onSuccess: ({ url }) => {
+      window.location.assign(url);
+    },
+  });
   const create = useMutation({
     mutationFn: createCreditListing,
     onSuccess: () => {
@@ -120,6 +131,31 @@ export function CreditsManagement({ subsection }: { subsection?: string }) {
           <small>Secure Billing escrow</small>
         </article>
       </div>
+      {showMarketplace && canBuyCredits && (
+        <form
+          className="generator"
+          onSubmit={(event) => {
+            event.preventDefault();
+            buy.mutate(Number(buyCredits));
+          }}
+        >
+          <label htmlFor="buy-credits">Buy credits from CreditFlow</label>
+          <input
+            id="buy-credits"
+            type="number"
+            min="100"
+            step="1"
+            required
+            placeholder="Credits (min. 100)"
+            value={buyCredits}
+            onChange={(event) => setBuyCredits(event.target.value)}
+          />
+          <button className="primary-button" disabled={buy.isPending}>
+            {buy.isPending ? "Redirecting to Stripe…" : "Buy credits"}
+          </button>
+          {buy.error && <p className="team-error">{buy.error.message}</p>}
+        </form>
+      )}
       {showMarketplace && (
         <form
           className="generator"
@@ -166,7 +202,7 @@ export function CreditsManagement({ subsection }: { subsection?: string }) {
                   {new Date(item.expiresAt).toLocaleDateString()}
                 </small>
               </div>
-              {item.sellerAccountId !== user?.workspace?.id && (
+              <div className="credits-listing-actions">
                 <button
                   className="primary-button"
                   disabled={purchase.isPending}
@@ -174,12 +210,17 @@ export function CreditsManagement({ subsection }: { subsection?: string }) {
                 >
                   Buy
                 </button>
-              )}
-              {item.sellerAccountId === user?.workspace?.id && (
-                <button disabled={cancelListing.isPending} onClick={() => cancelListing.mutate(item.id)}>
-                  Cancel listing
-                </button>
-              )}
+                {item.sellerAccountId === user?.accountId && (
+                  <button
+                    className="secondary-button danger"
+                    disabled={cancelListing.isPending}
+                    onClick={() => cancelListing.mutate(item.id)}
+                  >
+                    <Trash2 />
+                    Delete listing
+                  </button>
+                )}
+              </div>
             </div>
           ))}
           {!value.listings.length && <p>No marketplace listings are currently available.</p>}

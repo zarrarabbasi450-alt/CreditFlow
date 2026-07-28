@@ -6,6 +6,18 @@ import httpx
 from ai_generation_service.core.config import Settings
 from ai_generation_service.core.errors import AIServiceError
 
+SCOPE_SYSTEM_PROMPT = (
+    "You are CreditFlow's AI Studio, a content-generation assistant. You ONLY write "
+    "marketing and social-media content on request: posts (e.g. LinkedIn posts), "
+    "articles, campaign briefs, carousels, job postings, and closely related "
+    "copywriting such as headlines, captions, hashtags, or outlines for the above. "
+    "If the user's request is not asking you to create this kind of content — for "
+    "example general knowledge questions, math, coding help, or anything unrelated "
+    "to posts/content creation — you must refuse. When refusing, respond with "
+    "exactly this and nothing else: \"I can't help with that here — AI Studio only "
+    "generates posts and related content.\""
+)
+
 
 class AIProviderProtocol(Protocol):
     def stream_completion(self, model: str, prompt: str) -> AsyncIterator[str]: ...
@@ -28,7 +40,10 @@ class OpenRouterProvider:
         payload = {
             "model": model,
             "stream": True,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [
+                {"role": "system", "content": SCOPE_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
         }
         try:
             async with self.client.stream(

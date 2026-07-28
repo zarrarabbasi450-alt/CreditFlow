@@ -1,16 +1,45 @@
+export type ScraperJobType = "url" | "serp" | "research";
+export type ScraperJobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+
 export interface ScraperJob {
   id: string;
   accountId: string;
-  url: string;
-  name: string;
-  status: "Queued" | "Running" | "Complete" | "Failed";
-  pagesProcessed: number;
-  insightCount: number;
-  createdAt: string;
-}
-export interface CreateScraperJobRequest {
-  accountId: string;
-  url: string;
+  createdBy: string;
+  jobType: ScraperJobType;
+  target: string;
   name: string;
   maxPages: number;
+  status: ScraperJobStatus;
+  recurring: boolean;
+  intervalHours?: number | null;
+  nextRunAt?: string | null;
+  lastRunAt?: string | null;
+  pagesProcessed: number;
+  answer?: string | null;
+  answerHtml?: string;
+  failureReason?: string | null;
+  attempts: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ScrapedDocument {
+  id: string;
+  jobId: string;
+  accountId: string;
+  jobType: ScraperJobType;
+  source: string;
+  title?: string | null;
+  text: string;
+  data: Record<string, unknown>;
+  fetchedAt: string;
+}
+
+export interface CreateScraperJobRequest {
+  jobType: ScraperJobType;
+  target: string;
+  name: string;
+  maxPages?: number;
+  recurring?: boolean;
+  intervalHours?: number | null;
 }

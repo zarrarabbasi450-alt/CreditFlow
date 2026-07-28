@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     openrouter_site_url: str = "http://localhost:3000"
     openrouter_app_name: str = "CreditFlow"
     usage_service_url: str = "http://localhost:8005"
+    credits_service_url: str = "http://localhost:8004"
     fast_model: str = "openai/gpt-4o-mini"
     quality_model: str = "openai/gpt-4o"
     fallback_models: Annotated[list[str], NoDecode] = ["openai/gpt-4o-mini"]

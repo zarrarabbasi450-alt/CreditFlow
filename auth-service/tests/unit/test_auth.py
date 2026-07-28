@@ -139,9 +139,22 @@ async def test_verification_reset_rate_limit_and_logout(authentication: AuthServ
     await reset.request(identity.email)
     reset_event = publisher.events[-1]
     assert reset_event[0] == "user.password_reset_requested"
-    await reset.reset(cast(str, reset_event[1]["reset_token"]), "NewPassword123!")
+    reset_code = cast(str, reset_event[1]["reset_code"])
+    assert len(reset_code) == 6 and reset_code.isdigit()
+
+    with pytest.raises(AuthError) as invalid_code:
+        await reset.verify(identity.email, "000000", "10.0.0.3")
+    assert invalid_code.value.code == "INVALID_RESET_CODE"
+
+    await reset.verify(identity.email, reset_code, "10.0.0.3")
+    await reset.reset(identity.email, reset_code, "NewPassword123!", "10.0.0.3")
     relogin = await authentication.login(identity.email, "NewPassword123!", "10.0.0.3")
     assert relogin.identity.user_id == identity.user_id
+
+    # The code was consumed by reset() above — reusing it must fail.
+    with pytest.raises(AuthError) as reused:
+        await reset.reset(identity.email, reset_code, "AnotherPassword123!", "10.0.0.4")
+    assert reused.value.code == "INVALID_RESET_CODE"
 
     async with authentication.sessions() as session:
         user = await session.get(User, identity.user_id)
